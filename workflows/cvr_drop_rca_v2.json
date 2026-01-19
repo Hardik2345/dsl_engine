@@ -1,0 +1,162 @@
+{
+  "workflow_id": "cvr_drop_rca_v2",
+  "workflow_type": "root_cause_analysis",
+  "description": "RCA workflow for CVR drops with traffic, mix, and conversion branches",
+  "version": "2.0",
+
+  "trigger": {
+    "type": "alert",
+    "metric": "cvr",
+    "condition": {
+      "operator": "<",
+      "delta_pct": -15
+    },
+    "window": {
+      "type": "rolling",
+      "duration": "1h"
+    }
+  },
+
+  "context": {
+    "tenant_id": "{{tenant_id}}",
+    "brand_id": "{{brand_id}}",
+    "baseline_window": "previous_day_same_hour",
+    "currency": "{{brand_currency}}"
+  },
+
+  "nodes": [
+    {
+      "id": "data_sanity_check",
+      "type": "validation",
+      "checks": [
+        { "field": "sessions", "condition": "current > 0" },
+        { "field": "orders", "condition": "current >= 0" }
+      ],
+      "on_fail": {
+        "action": "terminate",
+        "reason": "Insufficient or invalid data for RCA"
+      },
+      "next": "metric_decomposition"
+    },
+
+    {
+      "id": "metric_decomposition",
+      "type": "metric_compare",
+      "metrics": ["orders", "sessions", "cvr"],
+      "next": "route_root_cause"
+    },
+
+    {
+      "id": "route_root_cause",
+      "type": "branch",
+      "rules": [
+        {
+          "all": [
+            { "metric": "sessions_delta_pct", "op": "<", "value": -10 }
+          ],
+          "then": "composite_root_cause"
+        },
+        {
+          "all": [
+            { "metric": "sessions_delta_pct", "op": ">", "value": 10 },
+            { "metric": "cvr_delta_pct", "op": "<", "value": -15 }
+          ],
+          "then": "composite_root_cause"
+        },
+        {
+          "all": [
+            { "metric": "sessions_delta_pct", "op": ">", "value": -5 },
+            { "metric": "sessions_delta_pct", "op": "<", "value": 5 },
+            { "metric": "cvr_delta_pct", "op": "<", "value": -15 }
+          ],
+          "then": "composite_root_cause"
+        }
+      ],
+      "default": {
+        "then": "generic_insight"
+      }
+    },
+
+    {
+      "id": "composite_root_cause",
+      "type": "composite",
+      "steps": [
+        "source_mix_breakdown",
+        "campaign_focus_breakdown"
+      ],
+      "next": "final_insight"
+    },
+
+    {
+      "id": "source_mix_breakdown",
+      "type": "recursive_dimension_breakdown",
+      "dimensions": ["utm_source", "utm_medium", "utm_campaign"],
+      "base_metric": "cvr",
+      "stop_conditions": {
+        "max_depth": 3,
+        "min_sessions": 100,
+        "min_impact_pct": 5,
+        "top_k": 5
+      }
+    },
+
+    {
+      "id": "campaign_focus_breakdown",
+      "type": "recursive_dimension_breakdown",
+      "dimensions": ["utm_campaign", "utm_content", "utm_term"],
+      "base_metric": "cvr",
+      "stop_conditions": {
+        "max_depth": 3,
+        "min_sessions": 100,
+        "min_impact_pct": 5,
+        "top_k": 5
+      }
+    },
+
+    {
+      "id": "generic_insight",
+      "type": "insight",
+      "output_format": "structured_text",
+      "template": {
+        "summary": "CVR dropped by {{cvr_delta_pct_fmt}} ({{baseline_cvr_pct}} → {{current_cvr_pct}}).",
+        "details": [
+          "Sessions changed by {{sessions_delta_pct_fmt}}",
+          "Orders changed by {{orders_delta_pct_fmt}}"
+        ],
+        "confidence": "{{confidence_score}}"
+      },
+      "persist": {
+        "table": "alert_rca_results",
+        "fields": ["alert_id", "summary", "confidence"]
+      }
+    },
+
+    {
+      "id": "final_insight",
+      "type": "insight",
+      "output_format": "structured_text",
+      "template": {
+        "summary": "CVR dropped by {{cvr_delta_pct_fmt}} ({{baseline_cvr_pct}} → {{current_cvr_pct}}). Primary driver: {{dimension}} = {{value}}.",
+        "details": [
+          "{{dimension}} contribution: {{contribution_pct_fmt}} of total negative impact",
+          "Segment CVR: {{top_baseline_cvr_pct}} → {{top_current_cvr_pct}} ({{top_cvr_delta_pct_fmt}})",
+          "Segment sessions: {{top_baseline_sessions}} → {{top_current_sessions}}",
+          "Segment orders: {{top_baseline_orders}} → {{top_current_orders}}",
+          "Overall sessions delta: {{sessions_delta_pct_fmt}}",
+          "Overall orders delta: {{orders_delta_pct_fmt}}"
+        ],
+        "confidence": "{{confidence_score}}"
+      },
+      "persist": {
+        "table": "alert_rca_results",
+        "fields": [
+          "alert_id",
+          "dimension",
+          "value",
+          "contribution_pct",
+          "summary"
+        ]
+      }
+    }
+  ]
+}
