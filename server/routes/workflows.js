@@ -1,9 +1,27 @@
 const express = require('express');
 const Workflow = require('../models/Workflow');
 const WorkflowVersion = require('../models/WorkflowVersion');
+const Tenant = require('../models/Tenant');
 const { validateWorkflowDefinition } = require('../validation/workflowDefinition');
 
 const router = express.Router({ mergeParams: true });
+
+// Middleware to validate tenant exists
+async function validateTenant(req, res, next) {
+  try {
+    const { tenantId } = req.params;
+    const tenant = await Tenant.findOne({ tenantId, isActive: true });
+    if (!tenant) {
+      return res.status(404).json({ error: `Tenant '${tenantId}' not found` });
+    }
+    req.tenant = tenant;
+    next();
+  } catch (err) {
+    next(err);
+  }
+}
+
+router.use(validateTenant);
 
 router.get('/', async (req, res, next) => {
   try {
@@ -105,6 +123,45 @@ router.get('/:workflowId/versions', async (req, res, next) => {
       .sort({ createdAt: -1 })
       .lean();
     res.json({ versions });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Update workflow metadata
+router.patch('/:workflowId', async (req, res, next) => {
+  try {
+    const { tenantId, workflowId } = req.params;
+    const { name, isActive } = req.body;
+
+    const workflow = await Workflow.findOne({ tenantId, workflowId });
+    if (!workflow) return res.status(404).json({ error: 'workflow not found' });
+
+    if (name !== undefined) workflow.name = name;
+    if (isActive !== undefined) workflow.isActive = isActive;
+
+    await workflow.save();
+    res.json({ workflow });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Delete a workflow and all its versions
+router.delete('/:workflowId', async (req, res, next) => {
+  try {
+    const { tenantId, workflowId } = req.params;
+
+    const workflow = await Workflow.findOne({ tenantId, workflowId });
+    if (!workflow) return res.status(404).json({ error: 'workflow not found' });
+
+    // Delete all versions
+    await WorkflowVersion.deleteMany({ tenantId, workflowId });
+
+    // Delete the workflow
+    await Workflow.deleteOne({ tenantId, workflowId });
+
+    res.json({ message: 'Workflow deleted successfully' });
   } catch (err) {
     next(err);
   }

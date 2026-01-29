@@ -12,6 +12,8 @@ async function RecursiveDimensionBreakdownNode(def, context) {
   const {
     max_depth = 1,
     min_sessions = 0,
+    min_current_sessions = min_sessions,
+    min_baseline_sessions = min_sessions,
     min_impact_pct = 0,
     top_k = 1          // <--- ranking control (default MVP = 1)
   } = stop_conditions;
@@ -65,35 +67,43 @@ async function RecursiveDimensionBreakdownNode(def, context) {
 
     const candidates = [];
     let totalBaselineSessions = 0;
-    let totalImpact = 0;
+    let totalCurrentSessions = 0;
 
     for (const row of result.rows) {
-      const { baseline_sessions } = row;
+      const { baseline_sessions, current_sessions } = row;
       if (baseline_sessions > 0) {
         totalBaselineSessions += baseline_sessions;
       }
+      if (current_sessions > 0) {
+        totalCurrentSessions += current_sessions;
+      }
     }
 
-    if (totalBaselineSessions === 0) return;
+    if (totalBaselineSessions === 0 && totalCurrentSessions === 0) return;
 
     // ---------- Phase 1: collect candidates ----------
     for (const row of result.rows) {
       const {
         dimension_value,
+        product_title,
         current_orders,
         baseline_orders,
         current_sessions,
         baseline_sessions
       } = row;
 
-      if (current_sessions < min_sessions) continue;
-      if (baseline_sessions === 0) continue;
+      if (
+        current_sessions < min_current_sessions &&
+        baseline_sessions < min_baseline_sessions
+      ) continue;
 
       const current_cvr =
         current_sessions === 0 ? null : current_orders / current_sessions;
 
       const baseline_cvr =
-        baseline_sessions === 0 ? null : baseline_orders / baseline_sessions;
+        baseline_sessions === 0
+          ? metrics.baseline_cvr
+          : baseline_orders / baseline_sessions;
 
       if (current_cvr == null || baseline_cvr == null) continue;
       if (baseline_cvr === 0) continue;
@@ -103,17 +113,21 @@ async function RecursiveDimensionBreakdownNode(def, context) {
 
       if (cvr_delta_pct >= 0) continue;
 
-      const segmentImpact =
-        (current_cvr - baseline_cvr) *
-        (baseline_sessions / totalBaselineSessions);
+      const baselineShare =
+        totalBaselineSessions === 0 ? 0 : baseline_sessions / totalBaselineSessions;
+      const currentShare =
+        totalCurrentSessions === 0 ? 0 : current_sessions / totalCurrentSessions;
+      const sessionShare = Math.max(baselineShare, currentShare);
 
-      if (segmentImpact >= 0) continue;
-
-      totalImpact += segmentImpact;
+      const displayValue =
+        activeDimension === 'product_id' && product_title
+          ? product_title
+          : dimension_value;
 
       candidates.push({
         dimension: activeDimension,
         value: dimension_value,
+        display_value: displayValue,
         depth,
         current: {
           orders: current_orders,
@@ -128,35 +142,20 @@ async function RecursiveDimensionBreakdownNode(def, context) {
         deltas: {
           cvr_delta_pct
         },
-        segmentImpact
+        sessionShare
       });
     }
 
-    if (!candidates.length || totalImpact === 0) return;
+    if (!candidates.length) return;
 
-    for (const entry of candidates) {
-      const contribution_pct =
-        Math.abs(entry.segmentImpact) /
-        Math.abs(totalImpact) * 100;
-
-      if (contribution_pct < min_impact_pct) {
-        entry.contribution_pct = contribution_pct;
-        continue;
-      }
-
-      entry.contribution_pct = contribution_pct;
-    }
-
-    const filteredCandidates = candidates.filter(
-      entry => entry.contribution_pct >= min_impact_pct
-    );
-
-    if (!filteredCandidates.length) return;
+    const filteredCandidates = candidates;
 
     // ---------- Phase 2: rank ----------
-    filteredCandidates.sort(
-      (a, b) => a.segmentImpact - b.segmentImpact
-    );
+    filteredCandidates.sort((a, b) => {
+      const aScore = Math.abs(a.deltas.cvr_delta_pct) * a.sessionShare;
+      const bScore = Math.abs(b.deltas.cvr_delta_pct) * b.sessionShare;
+      return bScore - aScore;
+    });
 
     const topCandidates = filteredCandidates.slice(0, top_k);
 
@@ -178,7 +177,7 @@ async function RecursiveDimensionBreakdownNode(def, context) {
   for (const entry of evidence) {
     const key = `${entry.dimension}::${entry.value}::${entry.depth}`;
     const existing = mergedEvidenceMap.get(key);
-    if (!existing || entry.segmentImpact < existing.segmentImpact) {
+    if (!existing || entry.sessionShare > existing.sessionShare) {
       mergedEvidenceMap.set(key, entry);
     }
   }

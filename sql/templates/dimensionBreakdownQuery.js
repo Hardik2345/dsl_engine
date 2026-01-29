@@ -1,6 +1,7 @@
 // sql/templates/dimensionBreakdownQuery.js
 
 const ALLOWED_DIMENSIONS = new Set([
+  "product_id",
   'utm_source',
   'utm_medium',
   'utm_campaign',
@@ -43,6 +44,13 @@ function buildFilterWhere(filters = []) {
   };
 }
 
+function buildNotNullFilter(dimension) {
+  if (dimension === 'product_id') {
+    return ' AND product_id IS NOT NULL';
+  }
+  return '';
+}
+
 module.exports = function dimensionBreakdownQuery({
   tenantId,
   dimension,
@@ -57,10 +65,14 @@ module.exports = function dimensionBreakdownQuery({
   assertSafeDimension(dimension);
 
   const { whereSql: filterSql, params: filterParams } = buildFilterWhere(filters);
+  const notNullSql = buildNotNullFilter(dimension);
   const windowStart = normalizeDateTime(window.start);
   const windowEnd = normalizeDateTime(window.end);
   const baselineStart = normalizeDateTime(baselineWindow.start);
   const baselineEnd = normalizeDateTime(baselineWindow.end);
+  const includeProductTitle = dimension === 'product_id';
+  const titleStart = baselineStart;
+  const titleEnd = windowEnd;
 
   const sql = `
 WITH
@@ -73,6 +85,7 @@ current_sessions AS (
   WHERE date >= DATE(?)
     AND date <  DATE(?)
     ${filterSql}
+    ${notNullSql}
   GROUP BY ${dimension}
 ),
 baseline_sessions AS (
@@ -84,6 +97,7 @@ baseline_sessions AS (
   WHERE date >= DATE(?)
     AND date <  DATE(?)
     ${filterSql}
+    ${notNullSql}
   GROUP BY ${dimension}
 ),
 current_orders AS (
@@ -106,6 +120,17 @@ baseline_orders AS (
     ${filterSql}
   GROUP BY ${dimension}
 ),
+${includeProductTitle ? `product_titles AS (
+  SELECT
+    product_id AS dimension_value,
+    MAX(product_title) AS product_title
+  FROM product_sessions_snapshot
+  WHERE date >= DATE(?)
+    AND date <  DATE(?)
+    ${filterSql}
+    ${notNullSql}
+  GROUP BY product_id
+),` : ''}
 all_keys AS (
   SELECT dimension_value FROM current_sessions
   UNION
@@ -125,13 +150,14 @@ SELECT
   COALESCE(bs.atc_sessions, 0) AS baseline_atc_sessions,
 
   COALESCE(co.orders, 0) AS current_orders,
-  COALESCE(bo.orders, 0) AS baseline_orders
+  COALESCE(bo.orders, 0) AS baseline_orders${includeProductTitle ? ',\n  pt.product_title' : ''}
 
 FROM all_keys k
 LEFT JOIN current_sessions cs ON cs.dimension_value = k.dimension_value
 LEFT JOIN baseline_sessions bs ON bs.dimension_value = k.dimension_value
 LEFT JOIN current_orders co ON co.dimension_value = k.dimension_value
 LEFT JOIN baseline_orders bo ON bo.dimension_value = k.dimension_value
+${includeProductTitle ? 'LEFT JOIN product_titles pt ON pt.dimension_value = k.dimension_value' : ''}
 ORDER BY current_sessions DESC;
   `;
 
@@ -146,7 +172,9 @@ ORDER BY current_sessions DESC;
     ...filterParams,
 
     baselineStart, baselineEnd,
-    ...filterParams
+    ...filterParams,
+
+    ...(includeProductTitle ? [titleStart, titleEnd, ...filterParams] : [])
   ];
 
   return {

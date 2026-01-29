@@ -2,7 +2,7 @@
   "workflow_id": "cvr_drop_rca_v1",
   "workflow_type": "root_cause_analysis",
   "description": "Deterministic RCA workflow for CVR drop alerts",
-  "version": "1.0",
+  "version": "1.4",
 
   "trigger": {
     "type": "alert",
@@ -62,18 +62,50 @@
             { "metric": "orders_delta_pct", "op": "<", "value": 5 },
             { "metric": "cvr_delta_pct", "op": "<", "value": -10 }
           ],
-          "then": "traffic_source_breakdown"
+          "then": "composite_breakdown"
+        },
+        {
+          "all": [
+            { "metric": "cvr_delta_pct", "op": "<", "value": -15 }
+          ],
+          "then": "composite_breakdown"
         },
         {
           "all": [
             { "metric": "sessions_delta_pct", "op": "<", "value": -10 }
           ],
-          "then": "traffic_source_breakdown"
+          "then": "composite_breakdown"
         }
       ],
       "default": {
         "then": "generic_insight"
       }
+    },
+
+    {
+      "id": "composite_breakdown",
+      "type": "composite",
+      "steps": [
+        "product_breakdown",
+        "traffic_source_breakdown"
+      ],
+      "next": "final_insight"
+    },
+
+    {
+      "id": "product_breakdown",
+      "type": "recursive_dimension_breakdown",
+      "dimensions": [
+        "product_id"
+      ],
+      "base_metric": "cvr",
+      "stop_conditions": {
+        "max_depth": 1,
+        "min_sessions": 50,
+        "min_impact_pct": 2,
+        "top_k": 10
+      },
+      "next": null
     },
 
     {
@@ -93,8 +125,7 @@
         "min_sessions": 100,
         "min_impact_pct": 10,
         "top_k": 5
-      },
-      "next": "final_insight"
+      }
     },
 
     {
@@ -124,9 +155,10 @@
       "type": "insight",
       "output_format": "structured_text",
       "template": {
-        "summary": "CVR dropped by {{cvr_delta_pct_fmt}} ({{baseline_cvr_pct}} → {{current_cvr_pct}}). Primary driver: {{dimension}} = {{value}}.",
+        "summary": "Conversion rate fell {{cvr_delta_pct_fmt}} from {{baseline_cvr_pct}} to {{current_cvr_pct}}. The biggest drag came from {{top1_dimension_label}} {{top1_value}} ({{top1_contribution_pct_fmt}} of negative impact), followed by {{top2_dimension_label}} {{top2_value}} ({{top2_contribution_pct_fmt}}).",
         "details": [
-          "{{dimension}} contribution: {{contribution_pct_fmt}} of total negative impact",
+          "Top drivers: 1) {{top1_dimension_label}} {{top1_value}} ({{top1_contribution_pct_fmt}}), 2) {{top2_dimension_label}} {{top2_value}} ({{top2_contribution_pct_fmt}}), 3) {{top3_dimension_label}} {{top3_value}} ({{top3_contribution_pct_fmt}}), 4) {{top4_dimension_label}} {{top4_value}} ({{top4_contribution_pct_fmt}})",
+          "Primary driver share: {{contribution_pct_fmt}} of total negative impact",
           "Segment CVR: {{top_baseline_cvr_pct}} → {{top_current_cvr_pct}} ({{top_cvr_delta_pct_fmt}})",
           "Segment sessions: {{top_baseline_sessions}} → {{top_current_sessions}}",
           "Segment orders: {{top_baseline_orders}} → {{top_current_orders}}",

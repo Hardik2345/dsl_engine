@@ -8,6 +8,7 @@ const ALLOWED_NODE_TYPES = new Set([
 ]);
 
 const ALLOWED_DIMENSIONS = new Set([
+  "product_id",
   'utm_source',
   'utm_medium',
   'utm_campaign',
