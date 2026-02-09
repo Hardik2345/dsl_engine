@@ -76,7 +76,10 @@ function validateWorkflowDefinition(definition) {
         errors.push(`branch node ${node.id} must include rules`);
       } else {
         for (const rule of node.rules) {
-          const conditions = rule.all || [];
+          const allConditions = rule.all || [];
+          const anyConditions = rule.any || [];
+          const conditions = [...allConditions, ...anyConditions];
+          
           for (const condition of conditions) {
             if (!ALLOWED_OPS.has(condition.op)) {
               errors.push(`branch node ${node.id} has invalid op ${condition.op}`);
@@ -111,7 +114,7 @@ function validateWorkflowDefinition(definition) {
     }
 
     if (node.type === 'insight') {
-      if (!node.template || typeof node.template !== 'object') {
+      if (!node.template || (typeof node.template !== 'object' && typeof node.template !== 'string')) {
         errors.push(`insight node ${node.id} must include template`);
       }
     }

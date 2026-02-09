@@ -2,6 +2,11 @@ function InsightNode(def, context) {
   const { template = {}, persist } = def;
   const { metrics = {}, breakdowns = {} } = context;
 
+  // Handle simple string templates
+  const templateObj = typeof template === 'string' 
+    ? { summary: template, details: [] }
+    : template;
+
   // --- Find top contributing breakdowns (global) ---
   const flatEvidence = [];
   Object.values(breakdowns).forEach(list => {
@@ -10,16 +15,28 @@ function InsightNode(def, context) {
     });
   });
 
+  const computeScore = (entry) => {
+    const metric = entry.base_metric || 'cvr';
+
+    if (metric === 'orders') {
+      const pct = entry.deltas?.orders_delta_pct;
+      const share = entry.orderShare ?? entry.sessionShare ?? 0;
+      return pct == null ? -Infinity : Math.abs(pct) * share;
+    }
+
+    if (metric === 'sessions') {
+      const pct = entry.deltas?.sessions_delta_pct;
+      return pct == null ? -Infinity : Math.abs(pct);
+    }
+
+    // default cvr
+    const pct = entry.deltas?.cvr_delta_pct;
+    const share = entry.sessionShare ?? 0;
+    return pct == null ? -Infinity : Math.abs(pct) * share;
+  };
+
   const scored = flatEvidence
-    .filter(entry => entry?.deltas?.cvr_delta_pct != null)
-    .map(entry => {
-      const cvrDelta = Math.abs(entry.deltas.cvr_delta_pct);
-      const sessionShare = entry.sessionShare ?? 0;
-      return {
-        entry,
-        score: cvrDelta * sessionShare
-      };
-    })
+    .map(entry => ({ entry, score: computeScore(entry) }))
     .sort((a, b) => b.score - a.score);
 
   const productCandidates = scored
@@ -78,9 +95,9 @@ function InsightNode(def, context) {
   };
 
   // --- Render output ---
-  const summary = renderTemplate(template.summary, templateContext);
-  const details = Array.isArray(template.details)
-    ? template.details.map(line => renderTemplate(line, templateContext))
+  const summary = renderTemplate(templateObj.summary, templateContext);
+  const details = Array.isArray(templateObj.details)
+    ? templateObj.details.map(line => renderTemplate(line, templateContext))
     : [];
 
   const insight = {

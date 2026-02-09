@@ -10,28 +10,38 @@ async function BranchNode(def, context) {
   }
 
   for (const rule of rules) {
-    const conditions = rule.all || [];
-    let matched = true;
+    const allConditions = rule.all || [];
+    let allMatched = true;
 
-    for (const condition of conditions) {
-      const { metric, op, value } = condition;
-
-      if (!(metric in metrics)) {
-        return {
-          status: 'fail',
-          reason: `BranchNode: Metric "${metric}" not found in context.metrics`
-        };
-      }
-
-      const metricValue = metrics[metric];
-
-      if (!evaluate(metricValue, op, value)) {
-        matched = false;
+    for (const condition of allConditions) {
+      if (!checkCondition(condition, metrics)) {
+        allMatched = false;
         break;
       }
     }
 
-    if (matched) {
+    const anyConditions = rule.any || [];
+    let anyMatched = false;
+    
+    if (anyConditions.length > 0) {
+      for (const condition of anyConditions) {
+        if (checkCondition(condition, metrics)) {
+          anyMatched = true;
+          break;
+        }
+      }
+    } else {
+      anyMatched = true; 
+    }
+
+    if (allConditions.length === 0 && anyConditions.length === 0) {
+        allMatched = true;
+    }
+
+    const finalMatch = (allConditions.length > 0 ? allMatched : true) && 
+                       (anyConditions.length > 0 ? anyMatched : true);
+
+    if (finalMatch) {
       return {
         status: 'pass',
         next: rule.then
@@ -54,6 +64,15 @@ async function BranchNode(def, context) {
 }
 
 module.exports = BranchNode;
+
+function checkCondition(condition, metrics) {
+    const { metric, op, value } = condition;
+    if (!(metric in metrics)) {
+        return false;
+    }
+    const metricValue = metrics[metric];
+    return evaluate(metricValue, op, value);
+}
 
 function evaluate(left, op, right) {
   switch (op) {

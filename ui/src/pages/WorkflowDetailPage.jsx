@@ -1,5 +1,5 @@
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Play, GitCommit, Clock, Edit2, Trash2 } from 'lucide-react';
+import { ArrowLeft, Play, GitCommit, Clock, Edit2, Trash2, Layout } from 'lucide-react';
 import { useWorkflow, useWorkflowVersions, useDeleteWorkflow } from '../api/hooks';
 import { Button, Badge, Card, CardHeader, CardContent, CardTitle, PageSpinner } from '../components/ui';
 import { format } from 'date-fns';
@@ -73,9 +73,15 @@ export default function WorkflowDetailPage() {
               View Runs
             </Button>
           </Link>
+          <Link to={`/workflows/${workflowId}/edit/visual`}>
+            <Button variant="secondary">
+              <Layout className="w-4 h-4 mr-2" />
+              Visual Editor
+            </Button>
+          </Link>
           <Button variant="secondary" onClick={() => setEditModalOpen(true)}>
             <Edit2 className="w-4 h-4 mr-2" />
-            Edit
+            Edit JSON
           </Button>
           <Button variant="danger" onClick={handleDelete}>
             <Trash2 className="w-4 h-4 mr-2" />

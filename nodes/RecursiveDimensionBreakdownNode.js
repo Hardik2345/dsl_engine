@@ -5,6 +5,7 @@ async function RecursiveDimensionBreakdownNode(def, context) {
   const {
     dimension,
     dimensions = [],
+    base_metric = 'cvr',
     stop_conditions = {},
     next
   } = def;
@@ -68,6 +69,8 @@ async function RecursiveDimensionBreakdownNode(def, context) {
     const candidates = [];
     let totalBaselineSessions = 0;
     let totalCurrentSessions = 0;
+    let totalBaselineOrders = 0;
+    let totalCurrentOrders = 0;
 
     for (const row of result.rows) {
       const { baseline_sessions, current_sessions } = row;
@@ -76,6 +79,14 @@ async function RecursiveDimensionBreakdownNode(def, context) {
       }
       if (current_sessions > 0) {
         totalCurrentSessions += current_sessions;
+      }
+
+      const { baseline_orders, current_orders } = row;
+      if (baseline_orders > 0) {
+        totalBaselineOrders += baseline_orders;
+      }
+      if (current_orders > 0) {
+        totalCurrentOrders += current_orders;
       }
     }
 
@@ -113,11 +124,27 @@ async function RecursiveDimensionBreakdownNode(def, context) {
 
       if (cvr_delta_pct >= 0) continue;
 
+      const orders_delta_pct =
+        baseline_orders === 0
+          ? null
+          : ((current_orders - baseline_orders) / baseline_orders) * 100;
+
+      const sessions_delta_pct =
+        baseline_sessions === 0
+          ? null
+          : ((current_sessions - baseline_sessions) / baseline_sessions) * 100;
+
       const baselineShare =
         totalBaselineSessions === 0 ? 0 : baseline_sessions / totalBaselineSessions;
       const currentShare =
         totalCurrentSessions === 0 ? 0 : current_sessions / totalCurrentSessions;
       const sessionShare = Math.max(baselineShare, currentShare);
+
+      const baselineOrderShare =
+        totalBaselineOrders === 0 ? 0 : baseline_orders / totalBaselineOrders;
+      const currentOrderShare =
+        totalCurrentOrders === 0 ? 0 : current_orders / totalCurrentOrders;
+      const orderShare = Math.max(baselineOrderShare, currentOrderShare);
 
       const displayValue =
         activeDimension === 'product_id' && product_title
@@ -140,9 +167,13 @@ async function RecursiveDimensionBreakdownNode(def, context) {
           cvr: baseline_cvr
         },
         deltas: {
-          cvr_delta_pct
+          cvr_delta_pct,
+          orders_delta_pct,
+          sessions_delta_pct
         },
-        sessionShare
+        sessionShare,
+        orderShare,
+        base_metric
       });
     }
 
@@ -151,9 +182,25 @@ async function RecursiveDimensionBreakdownNode(def, context) {
     const filteredCandidates = candidates;
 
     // ---------- Phase 2: rank ----------
+    const scoreFor = (entry) => {
+      const metric = entry.base_metric || base_metric || 'cvr';
+      if (metric === 'orders') {
+        const pct = entry.deltas.orders_delta_pct;
+        const share = entry.orderShare ?? entry.sessionShare ?? 0;
+        return pct == null ? -Infinity : Math.abs(pct) * share;
+      }
+      if (metric === 'sessions') {
+        const pct = entry.deltas.sessions_delta_pct;
+        return pct == null ? -Infinity : Math.abs(pct);
+      }
+      // default cvr
+      const pct = entry.deltas.cvr_delta_pct;
+      return pct == null ? -Infinity : Math.abs(pct) * entry.sessionShare;
+    };
+
     filteredCandidates.sort((a, b) => {
-      const aScore = Math.abs(a.deltas.cvr_delta_pct) * a.sessionShare;
-      const bScore = Math.abs(b.deltas.cvr_delta_pct) * b.sessionShare;
+      const aScore = scoreFor(a);
+      const bScore = scoreFor(b);
       return bScore - aScore;
     });
 

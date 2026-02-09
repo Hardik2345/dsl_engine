@@ -6,6 +6,7 @@ import WorkflowRunsPage from './pages/WorkflowRunsPage';
 import RunDetailPage from './pages/RunDetailPage';
 import InsightsPage from './pages/InsightsPage';
 import SettingsPage from './pages/SettingsPage';
+import WorkflowBuilderPage from './pages/WorkflowBuilderPage';
 
 function App() {
   return (
@@ -13,7 +14,9 @@ function App() {
       <Routes>
         <Route path="/" element={<Navigate to="/workflows" replace />} />
         <Route path="/workflows" element={<WorkflowsPage />} />
+        <Route path="/workflows/new/visual" element={<WorkflowBuilderPage />} />
         <Route path="/workflows/:workflowId" element={<WorkflowDetailPage />} />
+        <Route path="/workflows/:workflowId/edit/visual" element={<WorkflowBuilderPage />} />
         <Route path="/workflows/:workflowId/runs" element={<WorkflowRunsPage />} />
         <Route path="/workflows/:workflowId/runs/:runId" element={<RunDetailPage />} />
         <Route path="/insights" element={<InsightsPage />} />

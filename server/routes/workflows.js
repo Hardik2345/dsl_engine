@@ -108,6 +108,10 @@ router.post('/:workflowId/versions', async (req, res, next) => {
     });
 
     workflow.latestVersion = version;
+    // Keep display name in sync with the latest definition description (if provided)
+    if (definition.description) {
+      workflow.name = definition.description;
+    }
     await workflow.save();
 
     res.status(201).json({ version });

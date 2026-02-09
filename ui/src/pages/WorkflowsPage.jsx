@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
-import { Plus, Play, Eye, GitBranch, Edit2, Trash2, Clock } from 'lucide-react';
+import { Plus, Play, Eye, GitBranch, Edit2, Trash2, Clock, Layout } from 'lucide-react';
 import { useWorkflows, useDeleteWorkflow } from '../api/hooks';
 import { useTenant } from '../context/TenantContext';
 import { Button, Badge, Card, PageSpinner, EmptyState } from '../components/ui';
@@ -65,10 +65,16 @@ export default function WorkflowsPage() {
             Manage and run your workflow definitions for {tenantId}
           </p>
         </div>
-        <Button onClick={() => setCreateModalOpen(true)}>
-          <Plus className="w-4 h-4 mr-2" />
-          Create Workflow
-        </Button>
+        <div className="flex gap-2">
+          <Button onClick={() => navigate('/workflows/new/visual')} variant="secondary">
+            <Layout className="w-4 h-4 mr-2" />
+            Visual Builder
+          </Button>
+          <Button onClick={() => setCreateModalOpen(true)}>
+            <Plus className="w-4 h-4 mr-2" />
+            Create Workflow
+          </Button>
+        </div>
       </div>
 
       {/* Workflows Table */}

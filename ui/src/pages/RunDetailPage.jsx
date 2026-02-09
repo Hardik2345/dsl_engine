@@ -237,13 +237,27 @@ export default function RunDetailPage() {
                 <CardTitle className="text-primary-800">💡 Insight</CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-sm text-primary-900 font-medium">
+                <div className="text-sm text-primary-900 font-medium mb-3">
                   {run.context.scratch.finalInsight.summary}
-                </p>
+                </div>
+                
+                {run.context.scratch.finalInsight.details && run.context.scratch.finalInsight.details.length > 0 && (
+                   <ul className="list-disc list-inside space-y-1 mb-3">
+                      {run.context.scratch.finalInsight.details.map((detail, idx) => (
+                          <li key={idx} className="text-xs text-primary-800">
+                             {detail}
+                          </li>
+                      ))}
+                   </ul>
+                )}
+
                 {run.context.scratch.finalInsight.confidence && (
-                  <p className="text-xs text-primary-700 mt-2">
-                    Confidence: {(run.context.scratch.finalInsight.confidence * 100).toFixed(0)}%
-                  </p>
+                  <div className="pt-2 border-t border-primary-200/50 flex justify-between items-center">
+                    <span className="text-xs text-primary-700">Confidence Score</span>
+                    <span className="text-xs font-bold text-primary-800">
+                        {(run.context.scratch.finalInsight.confidence * 100).toFixed(0)}%
+                    </span>
+                  </div>
                 )}
               </CardContent>
             </Card>
