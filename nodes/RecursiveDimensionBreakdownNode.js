@@ -6,6 +6,7 @@ async function RecursiveDimensionBreakdownNode(def, context) {
     dimension,
     dimensions = [],
     base_metric = 'cvr',
+    include_orders,
     stop_conditions = {},
     next
   } = def;
@@ -55,12 +56,16 @@ async function RecursiveDimensionBreakdownNode(def, context) {
 
     const activeDimension = dimensionList[depth];
 
+    const needsOrders = base_metric === 'orders' || base_metric === 'cvr';
+    const includeOrders = include_orders ?? needsOrders;
+
     const querySpec = queryBuilder.buildDimensionBreakdownQuery({
       tenantId: meta.tenantId,
       dimension: activeDimension,
       window: meta.window,
       baselineWindow: meta.baselineWindow,
-      filters: activeFilters
+      filters: activeFilters,
+      includeOrders
     });
 
     const result = await queryExecutor.execute(querySpec);
@@ -143,6 +148,11 @@ async function RecursiveDimensionBreakdownNode(def, context) {
           ? null
           : ((current_atc_rate - baseline_atc_rate) / baseline_atc_rate) * 100;
 
+      const atc_sessions_delta_pct =
+        baseline_atc_sessions === 0
+          ? null
+          : ((current_atc_sessions - baseline_atc_sessions) / baseline_atc_sessions) * 100;
+
       // Skip if metric is improving (not dropping)
       if (isAtcMetric && (atc_rate_delta_pct == null || atc_rate_delta_pct >= 0)) continue;
       if (!isAtcMetric && (cvr_delta_pct == null || cvr_delta_pct >= 0)) continue;
@@ -196,6 +206,7 @@ async function RecursiveDimensionBreakdownNode(def, context) {
         deltas: {
           cvr_delta_pct,
           atc_rate_delta_pct,
+          atc_sessions_delta_pct,
           orders_delta_pct,
           sessions_delta_pct
         },
@@ -263,11 +274,57 @@ async function RecursiveDimensionBreakdownNode(def, context) {
 
   const mergedEvidence = Array.from(mergedEvidenceMap.values());
 
+  const scoreForEntry = (entry) => {
+    const metric = entry.base_metric || base_metric || 'cvr';
+    if (metric === 'orders') {
+      const pct = entry.deltas?.orders_delta_pct;
+      const share = entry.orderShare ?? entry.sessionShare ?? 0;
+      return pct == null ? -Infinity : Math.abs(pct) * share;
+    }
+    if (metric === 'sessions') {
+      const pct = entry.deltas?.sessions_delta_pct;
+      return pct == null ? -Infinity : Math.abs(pct);
+    }
+    if (metric === 'atc_rate') {
+      const pct = entry.deltas?.atc_rate_delta_pct;
+      return pct == null ? -Infinity : Math.abs(pct) * (entry.sessionShare ?? 0);
+    }
+    const pct = entry.deltas?.cvr_delta_pct;
+    return pct == null ? -Infinity : Math.abs(pct) * (entry.sessionShare ?? 0);
+  };
+
+  const rankedEvidence = [...mergedEvidence].sort((a, b) => {
+    const aScore = scoreForEntry(a);
+    const bScore = scoreForEntry(b);
+    return bScore - aScore;
+  });
+  const topEvidence = rankedEvidence[0] || null;
+
   return {
     status: 'pass',
     delta: {
+      metrics: topEvidence
+        ? {
+            top_dimension: topEvidence.dimension,
+            top_value: topEvidence.value,
+            top_display_value: topEvidence.display_value ?? topEvidence.value,
+            top_sessions_delta_pct: topEvidence.deltas?.sessions_delta_pct,
+            top_orders_delta_pct: topEvidence.deltas?.orders_delta_pct,
+            top_cvr_delta_pct: topEvidence.deltas?.cvr_delta_pct,
+            top_atc_rate_delta_pct: topEvidence.deltas?.atc_rate_delta_pct,
+            top_atc_sessions_delta_pct: topEvidence.deltas?.atc_sessions_delta_pct,
+            top_current_sessions: topEvidence.current?.sessions,
+            top_baseline_sessions: topEvidence.baseline?.sessions,
+            top_current_orders: topEvidence.current?.orders,
+            top_baseline_orders: topEvidence.baseline?.orders,
+            top_current_atc_sessions: topEvidence.current?.atc_sessions,
+            top_baseline_atc_sessions: topEvidence.baseline?.atc_sessions,
+            top_current_atc_rate: topEvidence.current?.atc_rate,
+            top_baseline_atc_rate: topEvidence.baseline?.atc_rate
+          }
+        : {},
       breakdowns: {
-        [dimensionList[0]]: mergedEvidence
+        [dimensionList[0]]: rankedEvidence
       }
     },
     next

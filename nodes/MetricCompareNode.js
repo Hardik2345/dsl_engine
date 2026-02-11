@@ -70,6 +70,11 @@ async function MetricCompareNode(def, context) {
       ? null
       : ((currentSessionsNum - baselineSessionsNum) / baselineSessionsNum) * 100;
 
+  const atc_sessions_delta_pct =
+    baselineAtcSessionsNum === 0
+      ? null
+      : ((currentAtcSessionsNum - baselineAtcSessionsNum) / baselineAtcSessionsNum) * 100;
+
   const cvr_delta_pct =
     baseline_cvr === 0
       ? null
@@ -102,6 +107,7 @@ async function MetricCompareNode(def, context) {
         // deltas
         orders_delta_pct,
         sessions_delta_pct,
+        atc_sessions_delta_pct,
         cvr_delta_pct,
         atc_rate_delta_pct
       }

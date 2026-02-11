@@ -12,13 +12,14 @@ module.exports = {
     });
   },
 
-  buildDimensionBreakdownQuery({ tenantId, dimension, window, baselineWindow, filters }) {
+  buildDimensionBreakdownQuery({ tenantId, dimension, window, baselineWindow, filters, includeOrders }) {
     return templates.dimensionBreakdownQuery({
       tenantId,
       dimension,
       window,
       baselineWindow,
-      filters
+      filters,
+      includeOrders
     });
   }
 };

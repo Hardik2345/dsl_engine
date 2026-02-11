@@ -50,19 +50,55 @@ export default function PropertiesPanel({ selectedNode, onChange, onClose, onDel
           <div className="space-y-4">
             <div className="text-sm font-medium text-gray-700">Rules</div>
             {(data.rules || []).map((rule, ruleIdx) => {
-               // Determine current mode: OR (any) if 'any' has items, otherwise default to AND (all)
-               const isOr = rule.any && rule.any.length > 0;
-               const currentList = isOr ? rule.any : (rule.all || []);
+               const isBreakdownsRule = !!rule.any_in_breakdowns;
+               const isOr = !isBreakdownsRule && rule.any && rule.any.length > 0;
+               const currentList = isBreakdownsRule
+                 ? (rule.any_in_breakdowns?.conditions || [])
+                 : (isOr ? rule.any : (rule.all || []));
                
                return (
                   <div key={ruleIdx} className="p-3 bg-gray-50 rounded border text-xs relative group">
                     <div className="flex justify-between items-center mb-2">
                        <span className="font-semibold text-gray-700">Rule {ruleIdx + 1}</span>
                        <div className="flex items-center gap-2">
+                           <select
+                               className="text-[10px] border border-gray-300 rounded px-2 py-0.5 bg-white"
+                               value={isBreakdownsRule ? 'breakdowns' : 'metrics'}
+                               onChange={(e) => {
+                                  const mode = e.target.value;
+                                  const newRules = [...data.rules];
+                                  if (mode === 'breakdowns') {
+                                    newRules[ruleIdx] = {
+                                      ...newRules[ruleIdx],
+                                      any_in_breakdowns: {
+                                        dimension: newRules[ruleIdx]?.any_in_breakdowns?.dimension || '',
+                                        limit: newRules[ruleIdx]?.any_in_breakdowns?.limit ?? '',
+                                        conditions: newRules[ruleIdx]?.any_in_breakdowns?.conditions || [{ metric: '', op: '>', value: '' }]
+                                      },
+                                      all: [],
+                                      any: []
+                                    };
+                                  } else {
+                                    newRules[ruleIdx] = {
+                                      ...newRules[ruleIdx],
+                                      any_in_breakdowns: undefined,
+                                      all: (newRules[ruleIdx].all && newRules[ruleIdx].all.length)
+                                        ? newRules[ruleIdx].all
+                                        : [{ metric: '', op: '>', value: '' }],
+                                      any: []
+                                    };
+                                  }
+                                  handleChange('rules', newRules);
+                               }}
+                           >
+                               <option value="metrics">Metrics</option>
+                               <option value="breakdowns">Breakdowns</option>
+                           </select>
                            <div className="flex bg-white rounded border border-gray-300 overflow-hidden">
                                <button 
                                    className={`px-2 py-0.5 text-[10px] ${!isOr ? 'bg-purple-100 text-purple-700 font-bold' : 'text-gray-500 hover:bg-gray-50'}`}
                                    onClick={() => {
+                                       if (isBreakdownsRule) return;
                                        const newRules = [...data.rules];
                                        // Switch to AND: move content to 'all', clear 'any'
                                        if (isOr) {
@@ -75,6 +111,7 @@ export default function PropertiesPanel({ selectedNode, onChange, onClose, onDel
                                <button 
                                   className={`px-2 py-0.5 text-[10px] ${isOr ? 'bg-purple-100 text-purple-700 font-bold' : 'text-gray-500 hover:bg-gray-50'}`}
                                   onClick={() => {
+                                       if (isBreakdownsRule) return;
                                        const newRules = [...data.rules];
                                        // Switch to OR: move content to 'any', clear 'all'
                                        if (!isOr) {
@@ -99,6 +136,41 @@ export default function PropertiesPanel({ selectedNode, onChange, onClose, onDel
                     </div>
                     
                     <div className="space-y-2">
+                       {isBreakdownsRule && (
+                         <div className="grid grid-cols-2 gap-2 mb-2">
+                           <div>
+                             <label className="block text-[10px] text-gray-500 mb-1">Dimension</label>
+                             <input
+                               placeholder="landing_page_path"
+                               className="w-full border p-1 rounded"
+                               value={rule.any_in_breakdowns?.dimension || ''}
+                               onChange={(e) => {
+                                 const newRules = [...data.rules];
+                                 const current = newRules[ruleIdx].any_in_breakdowns || {};
+                                 newRules[ruleIdx].any_in_breakdowns = { ...current, dimension: e.target.value };
+                                 handleChange('rules', newRules);
+                               }}
+                             />
+                           </div>
+                           <div>
+                             <label className="block text-[10px] text-gray-500 mb-1">Top K</label>
+                             <input
+                               type="number"
+                               min="1"
+                               placeholder="9"
+                               className="w-full border p-1 rounded"
+                               value={rule.any_in_breakdowns?.limit ?? ''}
+                               onChange={(e) => {
+                                 const newRules = [...data.rules];
+                                 const current = newRules[ruleIdx].any_in_breakdowns || {};
+                                 const nextValue = e.target.value === '' ? '' : Number(e.target.value);
+                                 newRules[ruleIdx].any_in_breakdowns = { ...current, limit: nextValue };
+                                 handleChange('rules', newRules);
+                               }}
+                             />
+                           </div>
+                         </div>
+                       )}
                        {currentList.map((cond, condIdx) => (
                            <div key={condIdx} className="flex gap-1 items-center">
                                <input 
@@ -107,10 +179,16 @@ export default function PropertiesPanel({ selectedNode, onChange, onClose, onDel
                                   value={cond.metric || ''} 
                                   onChange={(e) => {
                                      const newRules = [...data.rules];
-                                     const listKey = isOr ? 'any' : 'all';
-                                     // Ensure array exists
-                                     if (!newRules[ruleIdx][listKey]) newRules[ruleIdx][listKey] = [];
-                                     newRules[ruleIdx][listKey][condIdx] = { ...newRules[ruleIdx][listKey][condIdx], metric: e.target.value };
+                                     if (isBreakdownsRule) {
+                                       const current = newRules[ruleIdx].any_in_breakdowns || {};
+                                       const conditions = current.conditions || [];
+                                       conditions[condIdx] = { ...conditions[condIdx], metric: e.target.value };
+                                       newRules[ruleIdx].any_in_breakdowns = { ...current, conditions };
+                                     } else {
+                                       const listKey = isOr ? 'any' : 'all';
+                                       if (!newRules[ruleIdx][listKey]) newRules[ruleIdx][listKey] = [];
+                                       newRules[ruleIdx][listKey][condIdx] = { ...newRules[ruleIdx][listKey][condIdx], metric: e.target.value };
+                                     }
                                      handleChange('rules', newRules);
                                   }}
                                />
@@ -119,8 +197,15 @@ export default function PropertiesPanel({ selectedNode, onChange, onClose, onDel
                                    value={cond.op || '>'}
                                    onChange={(e) => {
                                       const newRules = [...data.rules];
-                                      const listKey = isOr ? 'any' : 'all';
-                                      newRules[ruleIdx][listKey][condIdx] = { ...newRules[ruleIdx][listKey][condIdx], op: e.target.value };
+                                      if (isBreakdownsRule) {
+                                        const current = newRules[ruleIdx].any_in_breakdowns || {};
+                                        const conditions = current.conditions || [];
+                                        conditions[condIdx] = { ...conditions[condIdx], op: e.target.value };
+                                        newRules[ruleIdx].any_in_breakdowns = { ...current, conditions };
+                                      } else {
+                                        const listKey = isOr ? 'any' : 'all';
+                                        newRules[ruleIdx][listKey][condIdx] = { ...newRules[ruleIdx][listKey][condIdx], op: e.target.value };
+                                      }
                                       handleChange('rules', newRules);
                                    }}
                                >
@@ -137,16 +222,30 @@ export default function PropertiesPanel({ selectedNode, onChange, onClose, onDel
                                   value={cond.value || ''} 
                                   onChange={(e) => {
                                        const newRules = [...data.rules];
-                                       const listKey = isOr ? 'any' : 'all';
-                                       newRules[ruleIdx][listKey][condIdx] = { ...newRules[ruleIdx][listKey][condIdx], value: e.target.value };
+                                       if (isBreakdownsRule) {
+                                         const current = newRules[ruleIdx].any_in_breakdowns || {};
+                                         const conditions = current.conditions || [];
+                                         conditions[condIdx] = { ...conditions[condIdx], value: e.target.value };
+                                         newRules[ruleIdx].any_in_breakdowns = { ...current, conditions };
+                                       } else {
+                                         const listKey = isOr ? 'any' : 'all';
+                                         newRules[ruleIdx][listKey][condIdx] = { ...newRules[ruleIdx][listKey][condIdx], value: e.target.value };
+                                       }
                                        handleChange('rules', newRules);
                                   }}
                                 />
                                 <button 
                                     onClick={() => {
                                         const newRules = [...data.rules];
-                                        const listKey = isOr ? 'any' : 'all';
-                                        newRules[ruleIdx][listKey].splice(condIdx, 1);
+                                        if (isBreakdownsRule) {
+                                          const current = newRules[ruleIdx].any_in_breakdowns || {};
+                                          const conditions = current.conditions || [];
+                                          conditions.splice(condIdx, 1);
+                                          newRules[ruleIdx].any_in_breakdowns = { ...current, conditions };
+                                        } else {
+                                          const listKey = isOr ? 'any' : 'all';
+                                          newRules[ruleIdx][listKey].splice(condIdx, 1);
+                                        }
                                         handleChange('rules', newRules);
                                     }}
                                     className="text-gray-400 hover:text-red-500 p-0.5"
@@ -158,9 +257,16 @@ export default function PropertiesPanel({ selectedNode, onChange, onClose, onDel
                        <button 
                             onClick={() => {
                                 const newRules = [...data.rules];
-                                const listKey = isOr ? 'any' : 'all';
-                                if (!newRules[ruleIdx][listKey]) newRules[ruleIdx][listKey] = [];
-                                newRules[ruleIdx][listKey].push({ metric: '', op: '>', value: '' });
+                                if (isBreakdownsRule) {
+                                  const current = newRules[ruleIdx].any_in_breakdowns || {};
+                                  const conditions = current.conditions || [];
+                                  conditions.push({ metric: '', op: '>', value: '' });
+                                  newRules[ruleIdx].any_in_breakdowns = { ...current, conditions };
+                                } else {
+                                  const listKey = isOr ? 'any' : 'all';
+                                  if (!newRules[ruleIdx][listKey]) newRules[ruleIdx][listKey] = [];
+                                  newRules[ruleIdx][listKey].push({ metric: '', op: '>', value: '' });
+                                }
                                 handleChange('rules', newRules);
                             }}
                             className="text-blue-600 text-[10px] hover:underline flex items-center gap-1 mt-1"

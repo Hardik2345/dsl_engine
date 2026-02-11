@@ -17,17 +17,31 @@ export const BranchNode = ({ data, isConnectable }) => {
       <div className="p-2 space-y-2">
         {/* Render Handles for Rules */}
         {rules.map((rule, idx) => {
-            const firstCondition = rule.all?.[0] || rule.any?.[0];
-            const isOr = rule.any && rule.any.length > 0;
+            const isBreakdownsRule = !!rule.any_in_breakdowns;
+            const firstCondition = isBreakdownsRule
+              ? rule.any_in_breakdowns?.conditions?.[0]
+              : rule.all?.[0] || rule.any?.[0];
+            const isOr = !isBreakdownsRule && rule.any && rule.any.length > 0;
             
             return (
               <div key={idx} className="relative flex items-center justify-end bg-purple-50 p-2 rounded text-xs border border-purple-100">
                 <span className="mr-4 text-purple-800 font-mono flex items-center gap-1">
-                  <span className="font-bold mr-1">{isOr ? 'OR' : 'AND'}</span>
+                  <span className="font-bold mr-1">
+                    {isBreakdownsRule ? 'ANY' : (isOr ? 'OR' : 'AND')}
+                  </span>
                   {firstCondition ? (
                       <>
                         {firstCondition.metric} {firstCondition.op} {firstCondition.value}
-                        {(rule.all?.length > 1 || rule.any?.length > 1) && <span className="text-[10px] text-purple-400 ml-1">(+{ (rule.all?.length || 0) + (rule.any?.length || 0) - 1 })</span>}
+                        {isBreakdownsRule && rule.any_in_breakdowns?.dimension && (
+                          <span className="text-[10px] text-purple-400 ml-1">
+                            in {rule.any_in_breakdowns.dimension}
+                          </span>
+                        )}
+                        {!isBreakdownsRule && (rule.all?.length > 1 || rule.any?.length > 1) && (
+                          <span className="text-[10px] text-purple-400 ml-1">
+                            (+{ (rule.all?.length || 0) + (rule.any?.length || 0) - 1 })
+                          </span>
+                        )}
                       </>
                   ) : (
                       <span className="italic text-gray-400">Empty Rule</span>

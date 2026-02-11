@@ -55,7 +55,8 @@ function InsightNode(def, context) {
     selected.push(entry);
   }
 
-  const topEvidence = selected[0] || null;
+  const matchedBreakdown = context?.scratch?.matched_breakdown || null;
+  const topEvidence = matchedBreakdown || selected[0] || null;
 
   // --- Build template context ---
   const templateContext = {
@@ -88,10 +89,17 @@ function InsightNode(def, context) {
     top_current_cvr_pct: formatPct((topEvidence?.current?.cvr || 0) * 100),
     top_baseline_cvr_pct: formatPct((topEvidence?.baseline?.cvr || 0) * 100),
     top_cvr_delta_pct_fmt: formatPct(topEvidence?.deltas?.cvr_delta_pct),
+    top_atc_rate_delta_pct_fmt: formatPct(topEvidence?.deltas?.atc_rate_delta_pct),
+    top_atc_sessions_delta_pct_fmt: formatPct(topEvidence?.deltas?.atc_sessions_delta_pct),
     top_current_sessions: topEvidence?.current?.sessions,
     top_baseline_sessions: topEvidence?.baseline?.sessions,
     top_current_orders: topEvidence?.current?.orders,
-    top_baseline_orders: topEvidence?.baseline?.orders
+    top_baseline_orders: topEvidence?.baseline?.orders,
+    top_current_atc_sessions: topEvidence?.current?.atc_sessions,
+    top_baseline_atc_sessions: topEvidence?.baseline?.atc_sessions,
+    top_current_atc_rate_pct: formatPct((topEvidence?.current?.atc_rate || 0) * 100),
+    top_baseline_atc_rate_pct: formatPct((topEvidence?.baseline?.atc_rate || 0) * 100),
+    top_sessions_delta_pct_fmt: formatPct(topEvidence?.deltas?.sessions_delta_pct)
   };
 
   // --- Render output ---

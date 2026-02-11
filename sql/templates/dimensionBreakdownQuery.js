@@ -56,7 +56,8 @@ module.exports = function dimensionBreakdownQuery({
   dimension,
   window,
   baselineWindow,
-  filters = []
+  filters = [],
+  includeOrders = true
 }) {
   if (!tenantId) throw new Error('dimensionBreakdownQuery: tenantId is required (db selector)');
   if (!window?.start || !window?.end) throw new Error('dimensionBreakdownQuery: window.start/window.end required');
@@ -99,7 +100,7 @@ baseline_sessions AS (
     ${filterSql}
     ${notNullSql}
   GROUP BY ${dimension}
-),
+),${includeOrders ? `
 current_orders AS (
   SELECT
     ${dimension} AS dimension_value,
@@ -119,7 +120,7 @@ baseline_orders AS (
     AND created_at <  ?
     ${filterSql}
   GROUP BY ${dimension}
-),
+),` : ''}
 ${includeProductTitle ? `product_titles AS (
   SELECT
     product_id AS dimension_value,
@@ -135,10 +136,11 @@ all_keys AS (
   SELECT dimension_value FROM current_sessions
   UNION
   SELECT dimension_value FROM baseline_sessions
+  ${includeOrders ? `
   UNION
   SELECT dimension_value FROM current_orders
   UNION
-  SELECT dimension_value FROM baseline_orders
+  SELECT dimension_value FROM baseline_orders` : ''}
 )
 SELECT
   k.dimension_value,
@@ -149,14 +151,12 @@ SELECT
   COALESCE(cs.atc_sessions, 0) AS current_atc_sessions,
   COALESCE(bs.atc_sessions, 0) AS baseline_atc_sessions,
 
-  COALESCE(co.orders, 0) AS current_orders,
-  COALESCE(bo.orders, 0) AS baseline_orders${includeProductTitle ? ',\n  pt.product_title' : ''}
+  ${includeOrders ? 'COALESCE(co.orders, 0) AS current_orders,\n  COALESCE(bo.orders, 0) AS baseline_orders' : '0 AS current_orders,\n  0 AS baseline_orders'}${includeProductTitle ? ',\n  pt.product_title' : ''}
 
 FROM all_keys k
 LEFT JOIN current_sessions cs ON cs.dimension_value = k.dimension_value
 LEFT JOIN baseline_sessions bs ON bs.dimension_value = k.dimension_value
-LEFT JOIN current_orders co ON co.dimension_value = k.dimension_value
-LEFT JOIN baseline_orders bo ON bo.dimension_value = k.dimension_value
+${includeOrders ? 'LEFT JOIN current_orders co ON co.dimension_value = k.dimension_value\nLEFT JOIN baseline_orders bo ON bo.dimension_value = k.dimension_value' : ''}
 ${includeProductTitle ? 'LEFT JOIN product_titles pt ON pt.dimension_value = k.dimension_value' : ''}
 ORDER BY current_sessions DESC;
   `;
@@ -168,12 +168,12 @@ ORDER BY current_sessions DESC;
     baselineStart, baselineEnd,
     ...filterParams,
 
-    windowStart, windowEnd,
-    ...filterParams,
-
-    baselineStart, baselineEnd,
-    ...filterParams,
-
+    ...(includeOrders ? [
+      windowStart, windowEnd,
+      ...filterParams,
+      baselineStart, baselineEnd,
+      ...filterParams
+    ] : []),
     ...(includeProductTitle ? [titleStart, titleEnd, ...filterParams] : [])
   ];
 
