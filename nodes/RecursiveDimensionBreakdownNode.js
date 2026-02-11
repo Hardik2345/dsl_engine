@@ -100,7 +100,9 @@ async function RecursiveDimensionBreakdownNode(def, context) {
         current_orders,
         baseline_orders,
         current_sessions,
-        baseline_sessions
+        baseline_sessions,
+        current_atc_sessions,
+        baseline_atc_sessions
       } = row;
 
       if (
@@ -116,13 +118,34 @@ async function RecursiveDimensionBreakdownNode(def, context) {
           ? metrics.baseline_cvr
           : baseline_orders / baseline_sessions;
 
-      if (current_cvr == null || baseline_cvr == null) continue;
-      if (baseline_cvr === 0) continue;
+      const current_atc_rate =
+        current_sessions === 0 ? null : current_atc_sessions / current_sessions;
+
+      const baseline_atc_rate =
+        baseline_sessions === 0
+          ? (metrics.baseline_atc_rate || null)
+          : baseline_atc_sessions / baseline_sessions;
+
+      // For atc_rate base_metric, allow null CVR but require valid atc_rate
+      const isAtcMetric = (base_metric === 'atc_rate');
+      if (!isAtcMetric && (current_cvr == null || baseline_cvr == null)) continue;
+      if (!isAtcMetric && baseline_cvr === 0) continue;
+      if (isAtcMetric && (current_atc_rate == null || baseline_atc_rate == null)) continue;
+      if (isAtcMetric && baseline_atc_rate === 0) continue;
 
       const cvr_delta_pct =
-        ((current_cvr - baseline_cvr) / baseline_cvr) * 100;
+        (baseline_cvr == null || baseline_cvr === 0)
+          ? null
+          : ((current_cvr - baseline_cvr) / baseline_cvr) * 100;
 
-      if (cvr_delta_pct >= 0) continue;
+      const atc_rate_delta_pct =
+        (baseline_atc_rate == null || baseline_atc_rate === 0)
+          ? null
+          : ((current_atc_rate - baseline_atc_rate) / baseline_atc_rate) * 100;
+
+      // Skip if metric is improving (not dropping)
+      if (isAtcMetric && (atc_rate_delta_pct == null || atc_rate_delta_pct >= 0)) continue;
+      if (!isAtcMetric && (cvr_delta_pct == null || cvr_delta_pct >= 0)) continue;
 
       const orders_delta_pct =
         baseline_orders === 0
@@ -159,15 +182,20 @@ async function RecursiveDimensionBreakdownNode(def, context) {
         current: {
           orders: current_orders,
           sessions: current_sessions,
-          cvr: current_cvr
+          atc_sessions: current_atc_sessions,
+          cvr: current_cvr,
+          atc_rate: current_atc_rate
         },
         baseline: {
           orders: baseline_orders,
           sessions: baseline_sessions,
-          cvr: baseline_cvr
+          atc_sessions: baseline_atc_sessions,
+          cvr: baseline_cvr,
+          atc_rate: baseline_atc_rate
         },
         deltas: {
           cvr_delta_pct,
+          atc_rate_delta_pct,
           orders_delta_pct,
           sessions_delta_pct
         },
@@ -192,6 +220,10 @@ async function RecursiveDimensionBreakdownNode(def, context) {
       if (metric === 'sessions') {
         const pct = entry.deltas.sessions_delta_pct;
         return pct == null ? -Infinity : Math.abs(pct);
+      }
+      if (metric === 'atc_rate') {
+        const pct = entry.deltas.atc_rate_delta_pct;
+        return pct == null ? -Infinity : Math.abs(pct) * entry.sessionShare;
       }
       // default cvr
       const pct = entry.deltas.cvr_delta_pct;

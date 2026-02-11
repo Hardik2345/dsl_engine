@@ -1,8 +1,13 @@
 const express = require('express');
+const crypto = require('crypto');
 const Workflow = require('../models/Workflow');
 const WorkflowVersion = require('../models/WorkflowVersion');
 const Tenant = require('../models/Tenant');
 const { validateWorkflowDefinition } = require('../validation/workflowDefinition');
+
+function generateWorkflowId() {
+  return `wf_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
+}
 
 const router = express.Router({ mergeParams: true });
 
@@ -37,6 +42,12 @@ router.post('/', async (req, res, next) => {
   try {
     const { tenantId } = req.params;
     const definition = req.body;
+    
+    // Auto-generate workflow_id if not provided
+    if (!definition.workflow_id) {
+      definition.workflow_id = generateWorkflowId();
+    }
+    
     const { ok, errors } = validateWorkflowDefinition(definition);
     if (!ok) {
       return res.status(400).json({ errors });
@@ -48,7 +59,7 @@ router.post('/', async (req, res, next) => {
     const workflow = await Workflow.create({
       tenantId,
       workflowId,
-      name: definition.description || workflowId,
+      name: definition.name || definition.description || workflowId,
       latestVersion: version,
       isActive: true
     });

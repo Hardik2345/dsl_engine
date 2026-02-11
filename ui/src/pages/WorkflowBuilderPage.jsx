@@ -1,11 +1,14 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { WorkflowBuilder, PageSpinner } from '../components';
-import { useWorkflow, useCreateWorkflow, useCreateWorkflowVersion } from '../api/hooks';
+import { useQueryClient } from '@tanstack/react-query';
+import { useWorkflow, useCreateWorkflowVersion, useTenants } from '../api/hooks';
+import { workflowApi } from '../api/endpoints';
+import { useTenant } from '../context/TenantContext';
 import toast from 'react-hot-toast';
 
 const NEW_WORKFLOW_TEMPLATE = {
-  workflow_id: 'new_workflow',
+  name: 'New Workflow',
   workflow_type: 'root_cause_analysis',
   description: 'New visual workflow',
   version: '1.0',
@@ -49,12 +52,17 @@ export default function WorkflowBuilderPage() {
   const { workflowId } = useParams();
   const navigate = useNavigate();
   const isEditing = !!workflowId;
+  const queryClient = useQueryClient();
+  const { tenantId } = useTenant();
+  const { data: tenants = [], isLoading: tenantsLoading } = useTenants();
+  const [scope, setScope] = useState('single'); // 'single' | 'multiple' | 'global'
+  const [selectedTenantIds, setSelectedTenantIds] = useState([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Hooks for fetching (if editing)
   const { data: workflowData, isLoading, error } = useWorkflow(workflowId);
 
   // Hooks for mutations
-  const createWorkflow = useCreateWorkflow();
   const createVersion = useCreateWorkflowVersion(workflowId);
 
   if (isEditing && isLoading) return <PageSpinner />;
@@ -71,8 +79,87 @@ export default function WorkflowBuilderPage() {
   }
 
   const initialData = isEditing 
-        ? (workflowData?.version?.definitionJson || NEW_WORKFLOW_TEMPLATE)
+        ? {
+            ...(workflowData?.version?.definitionJson || NEW_WORKFLOW_TEMPLATE),
+            name: workflowData?.workflow?.name || workflowData?.version?.definitionJson?.name
+          }
         : NEW_WORKFLOW_TEMPLATE;
+
+  const tenantOptions = useMemo(() => {
+    const list = Array.isArray(tenants) ? tenants : [];
+    return list
+      .filter((tenant) => tenant?.tenantId)
+      .map((tenant) => tenant.tenantId)
+      .sort();
+  }, [tenants]);
+
+  const resolvedTenantIds = useMemo(() => {
+    if (scope === 'global') return tenantOptions;
+    if (scope === 'multiple') return selectedTenantIds;
+    return tenantId ? [tenantId] : [];
+  }, [scope, selectedTenantIds, tenantId, tenantOptions]);
+
+  const toggleTenantSelection = (targetTenantId) => {
+    setSelectedTenantIds((prev) => {
+      if (prev.includes(targetTenantId)) {
+        return prev.filter((id) => id !== targetTenantId);
+      }
+      return [...prev, targetTenantId];
+    });
+  };
+
+  const handleScopeChange = (nextScope) => {
+    setScope(nextScope);
+    if (nextScope === 'multiple' && selectedTenantIds.length === 0 && tenantId) {
+      setSelectedTenantIds([tenantId]);
+    }
+  };
+
+  const createWorkflowsForTenants = async (definition, tenantIds) => {
+    if (!tenantIds.length) {
+      toast.error('Select at least one tenant');
+      return null;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      const results = await Promise.allSettled(
+        tenantIds.map((targetTenantId) => workflowApi.create(targetTenantId, definition))
+      );
+
+      const successes = results
+        .map((result, index) => ({ result, tenantId: tenantIds[index] }))
+        .filter((entry) => entry.result.status === 'fulfilled');
+      const failures = results
+        .map((result, index) => ({ result, tenantId: tenantIds[index] }))
+        .filter((entry) => entry.result.status === 'rejected');
+
+      successes.forEach(({ tenantId: successTenantId }) => {
+        queryClient.invalidateQueries({ queryKey: ['workflows', successTenantId] });
+      });
+
+      if (failures.length) {
+        const failedTenantList = failures.map((entry) => entry.tenantId).join(', ');
+        toast.error(`Failed to create workflow for: ${failedTenantList}`);
+      }
+
+      if (!successes.length) {
+        return null;
+      }
+
+      if (tenantIds.length === 1 && tenantIds[0] === tenantId) {
+        return successes[0].result.value;
+      }
+
+      const successCount = successes.length;
+      const successLabel = successCount === 1 ? 'tenant' : 'tenant(s)';
+      toast.success(`Workflow created for ${successCount} ${successLabel}`);
+      return null;
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   const handleSave = async (workflowJson) => {
     try {
@@ -91,16 +178,17 @@ export default function WorkflowBuilderPage() {
         toast.success(`New version ${newVersion} saved successfully`);
         navigate(`/workflows/${workflowId}`);
       } else {
-        // Creating new workflow
-        if(workflowJson.workflow_id === 'new_workflow') {
-             // If user didn't change ID, maybe prompt or just accept? 
-             // Ideally WorkflowBuilder handles metadata editing like ID.
-             // We'll trust what's in the JSON for now.
-             // But if it conflicts, backend will throw.
+        // Creating new workflow - workflow_id will be auto-generated by server
+        // Remove any placeholder workflow_id to let server generate
+        delete workflowJson.workflow_id;
+        
+        const result = await createWorkflowsForTenants(workflowJson, resolvedTenantIds);
+        if (result?.workflow?.workflowId) {
+          toast.success('Workflow created successfully');
+          navigate(`/workflows/${result.workflow.workflowId}`);
+        } else if (result === null) {
+          navigate('/workflows');
         }
-        await createWorkflow.mutateAsync(workflowJson);
-        toast.success('Workflow created successfully');
-        navigate(`/workflows/${workflowJson.workflow_id}`);
       }
     } catch (err) {
       console.error(err);
@@ -118,6 +206,14 @@ export default function WorkflowBuilderPage() {
         onSave={handleSave}
         onBack={() => navigate(isEditing ? `/workflows/${workflowId}` : '/workflows')}
         isEditing={isEditing}
+        scope={scope}
+        onScopeChange={handleScopeChange}
+        tenantOptions={tenantOptions}
+        selectedTenantIds={selectedTenantIds}
+        onToggleTenant={toggleTenantSelection}
+        tenantsLoading={tenantsLoading}
+        currentTenantId={tenantId}
+        isSaving={isSubmitting}
       />
     </div>
   );

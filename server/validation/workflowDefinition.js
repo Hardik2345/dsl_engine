@@ -28,7 +28,8 @@ function validateWorkflowDefinition(definition) {
     return { ok: false, errors: ['definition must be an object'] };
   }
 
-  ['workflow_id', 'workflow_type', 'version', 'nodes'].forEach(field => {
+  // workflow_id is optional (auto-generated if not provided)
+  ['workflow_type', 'version', 'nodes'].forEach(field => {
     if (!definition[field]) {
       errors.push(`missing ${field}`);
     }

@@ -61,7 +61,8 @@ export default function WorkflowDetailPage() {
       {/* Header */}
       <div className="flex items-start justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">{workflowId}</h1>
+          <h1 className="text-2xl font-bold text-gray-900">{workflow?.name || workflowId}</h1>
+          <p className="text-xs text-gray-400 font-mono mt-1">{workflowId}</p>
           <p className="text-gray-500 mt-1">
             {definition?.description || 'No description'}
           </p>

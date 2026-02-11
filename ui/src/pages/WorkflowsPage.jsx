@@ -124,11 +124,9 @@ export default function WorkflowsPage() {
                           to={`/workflows/${workflow.workflowId}`}
                           className="font-medium text-gray-900 hover:text-primary-600"
                         >
-                          {workflow.workflowId}
+                          {workflow.name || workflow.workflowId}
                         </Link>
-                        {workflow.name && workflow.name !== workflow.workflowId && (
-                          <p className="text-sm text-gray-500">{workflow.name}</p>
-                        )}
+                        <p className="text-xs text-gray-400 font-mono">{workflow.workflowId}</p>
                       </div>
                     </td>
                     <td className="py-4 px-6">

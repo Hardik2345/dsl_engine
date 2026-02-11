@@ -8,7 +8,20 @@ import WorkflowCanvas from './WorkflowCanvas';
 import PropertiesPanel from './PropertiesPanel';
 import { jsonToGraph, graphToJson } from '../../utils/workflowTransformers';
 
-function WorkflowBuilderContent({ initialData, onSave, onBack, isEditing }) {
+function WorkflowBuilderContent({
+  initialData,
+  onSave,
+  onBack,
+  isEditing,
+  scope,
+  onScopeChange,
+  tenantOptions,
+  selectedTenantIds,
+  onToggleTenant,
+  tenantsLoading,
+  currentTenantId,
+  isSaving,
+}) {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [selectedNode, setSelectedNode] = useState(null);
@@ -84,12 +97,11 @@ function WorkflowBuilderContent({ initialData, onSave, onBack, isEditing }) {
       setSelectedNode(null);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     try {
       const workflowJson = graphToJson(nodes, edges, metadata);
       // Validate or cleanup
-      onSave(workflowJson);
-      toast.success('Workflow converted to JSON successfully');
+      await onSave(workflowJson);
     } catch (error) {
       console.error(error);
       toast.error('Failed to generate workflow JSON');
@@ -117,13 +129,15 @@ function WorkflowBuilderContent({ initialData, onSave, onBack, isEditing }) {
             <div className="flex items-center gap-2 flex-wrap">
               <input
                 className="text-lg font-semibold text-gray-900 border border-transparent focus:border-gray-300 rounded px-2 py-1 min-w-[180px]"
-                value={metadata.workflow_id || ''}
-                onChange={(e) => setMetadata((m) => ({ ...m, workflow_id: e.target.value }))}
-                placeholder="workflow_id"
-                disabled={isEditing}
+                value={metadata.name || ''}
+                onChange={(e) => setMetadata((m) => ({ ...m, name: e.target.value }))}
+                placeholder="Workflow Name"
               />
               <span className="text-xs text-gray-500">Visual Editor</span>
             </div>
+            {metadata.workflow_id && (
+              <p className="text-xs text-gray-400 font-mono px-2">{metadata.workflow_id}</p>
+            )}
             <input
               className="mt-1 text-xs text-gray-700 border border-gray-200 rounded px-2 py-1 w-full max-w-md"
               value={metadata.description || ''}
@@ -143,13 +157,93 @@ function WorkflowBuilderContent({ initialData, onSave, onBack, isEditing }) {
           </button>
           <button
             onClick={handleSave}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded hover:bg-blue-700"
+            disabled={isSaving}
+            className={`flex items-center gap-2 px-4 py-2 text-sm font-medium text-white rounded ${
+              isSaving ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
+            }`}
           >
             <Save className="w-4 h-4" />
-            Save Changes
+            {isSaving ? 'Saving...' : 'Save Changes'}
           </button>
         </div>
       </div>
+
+      {!isEditing && (
+        <div className="bg-gray-50 border-b border-gray-200 px-4 py-3">
+          <div className="flex flex-wrap items-start gap-6">
+            <div>
+              <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                Workflow Scope
+              </div>
+              <div className="flex flex-wrap gap-4 text-sm text-gray-700">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="workflow-scope"
+                    value="single"
+                    checked={scope === 'single'}
+                    onChange={() => onScopeChange?.('single')}
+                  />
+                  Current tenant ({currentTenantId || 'None'})
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="workflow-scope"
+                    value="multiple"
+                    checked={scope === 'multiple'}
+                    onChange={() => onScopeChange?.('multiple')}
+                  />
+                  Selected tenants
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="workflow-scope"
+                    value="global"
+                    checked={scope === 'global'}
+                    onChange={() => onScopeChange?.('global')}
+                  />
+                  Global (all tenants)
+                </label>
+              </div>
+            </div>
+
+            {scope === 'multiple' && (
+              <div className="min-w-[220px]">
+                <div className="text-xs text-gray-500 mb-2">Select tenants</div>
+                <div className="max-h-36 overflow-auto border border-gray-200 rounded bg-white">
+                  {tenantsLoading ? (
+                    <div className="px-3 py-2 text-sm text-gray-500">Loading tenants...</div>
+                  ) : tenantOptions?.length ? (
+                    tenantOptions.map((tenantId) => (
+                      <label
+                        key={tenantId}
+                        className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedTenantIds?.includes(tenantId)}
+                          onChange={() => onToggleTenant?.(tenantId)}
+                        />
+                        {tenantId}
+                      </label>
+                    ))
+                  ) : (
+                    <div className="px-3 py-2 text-sm text-gray-500">No tenants available</div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {scope === 'global' && (
+              <div className="text-xs text-gray-500 mt-6">
+                This will create the workflow for {tenantOptions?.length || 0} tenant(s).
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden">
