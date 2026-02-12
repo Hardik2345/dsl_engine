@@ -1,13 +1,16 @@
 import { useState, useEffect } from 'react';
 import { X, Save } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { useUpdateWorkflow, useWorkflow, useCreateWorkflowVersion } from '../api/hooks';
+import { useUpdateWorkflow, useWorkflow, useCreateWorkflowVersion, useUpdateGlobalWorkflow, useCreateGlobalWorkflowVersion } from '../api/hooks';
 import { Button } from './ui';
 
 export default function EditWorkflowModal({ workflow, onClose }) {
   const { data: workflowData } = useWorkflow(workflow.workflowId);
   const updateWorkflow = useUpdateWorkflow(workflow.workflowId);
+  const updateGlobalWorkflow = useUpdateGlobalWorkflow(workflow.workflowId);
   const createVersion = useCreateWorkflowVersion(workflow.workflowId);
+  const createGlobalVersion = useCreateGlobalWorkflowVersion(workflow.workflowId);
+  const isGlobal = workflow.scope === 'global';
   
   const [mode, setMode] = useState('metadata'); // 'metadata' or 'definition'
   const [formData, setFormData] = useState({
@@ -28,10 +31,17 @@ export default function EditWorkflowModal({ workflow, onClose }) {
     e.preventDefault();
 
     try {
-      await updateWorkflow.mutateAsync({
-        name: formData.name,
-        isActive: formData.isActive,
-      });
+      if (isGlobal) {
+        await updateGlobalWorkflow.mutateAsync({
+          name: formData.name,
+          isActive: formData.isActive,
+        });
+      } else {
+        await updateWorkflow.mutateAsync({
+          name: formData.name,
+          isActive: formData.isActive,
+        });
+      }
       toast.success('Workflow updated successfully');
       onClose();
     } catch (err) {
@@ -53,7 +63,11 @@ export default function EditWorkflowModal({ workflow, onClose }) {
       
       definition.version = newVersion;
 
-      await createVersion.mutateAsync(definition);
+      if (isGlobal) {
+        await createGlobalVersion.mutateAsync(definition);
+      } else {
+        await createVersion.mutateAsync(definition);
+      }
       toast.success(`New version ${newVersion} created successfully`);
       onClose();
     } catch (err) {

@@ -36,20 +36,30 @@ export const tenantApi = {
 // Workflow APIs
 export const workflowApi = {
   // List all workflows for a tenant
-  list: async (tenantId) => {
-    const { data } = await api.get(`/tenants/${tenantId}/workflows`);
+  list: async (tenantId, { includeGlobal = true } = {}) => {
+    const { data } = await api.get(`/tenants/${tenantId}/workflows`, {
+      params: includeGlobal ? { includeGlobal: true } : {}
+    });
     return data.workflows;
   },
 
   // Get a single workflow with its latest version
-  get: async (tenantId, workflowId) => {
-    const { data } = await api.get(`/tenants/${tenantId}/workflows/${workflowId}`);
+  get: async (tenantId, workflowId, { includeGlobal = true } = {}) => {
+    const { data } = await api.get(`/tenants/${tenantId}/workflows/${workflowId}`, {
+      params: includeGlobal ? { includeGlobal: true } : {}
+    });
     return data;
   },
 
   // Create a new workflow
   create: async (tenantId, definition) => {
     const { data } = await api.post(`/tenants/${tenantId}/workflows`, definition);
+    return data;
+  },
+
+  // Create a new global workflow
+  createGlobal: async (definition) => {
+    const { data } = await api.post('/workflows/global', definition);
     return data;
   },
 
@@ -62,9 +72,20 @@ export const workflowApi = {
     return data;
   },
 
+  // Create a new version of a global workflow
+  createGlobalVersion: async (workflowId, definition) => {
+    const { data } = await api.post(
+      `/workflows/global/${workflowId}/versions`,
+      definition
+    );
+    return data;
+  },
+
   // List all versions of a workflow
-  listVersions: async (tenantId, workflowId) => {
-    const { data } = await api.get(`/tenants/${tenantId}/workflows/${workflowId}/versions`);
+  listVersions: async (tenantId, workflowId, { includeGlobal = true } = {}) => {
+    const { data } = await api.get(`/tenants/${tenantId}/workflows/${workflowId}/versions`, {
+      params: includeGlobal ? { includeGlobal: true } : {}
+    });
     return data.versions;
   },
 
@@ -77,9 +98,21 @@ export const workflowApi = {
     return data.workflow;
   },
 
+  // Update global workflow metadata
+  updateGlobal: async (workflowId, updates) => {
+    const { data } = await api.patch(`/workflows/global/${workflowId}`, updates);
+    return data.workflow;
+  },
+
   // Delete a workflow
   delete: async (tenantId, workflowId) => {
     const { data } = await api.delete(`/tenants/${tenantId}/workflows/${workflowId}`);
+    return data;
+  },
+
+  // Delete a global workflow
+  deleteGlobal: async (workflowId) => {
+    const { data } = await api.delete(`/workflows/global/${workflowId}`);
     return data;
   },
 };

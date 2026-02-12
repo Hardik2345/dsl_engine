@@ -39,7 +39,7 @@ export function useWorkflows() {
   const { tenantId } = useTenant();
   return useQuery({
     queryKey: ['workflows', tenantId],
-    queryFn: () => workflowApi.list(tenantId),
+    queryFn: () => workflowApi.list(tenantId, { includeGlobal: true }),
   });
 }
 
@@ -47,7 +47,7 @@ export function useWorkflow(workflowId) {
   const { tenantId } = useTenant();
   return useQuery({
     queryKey: ['workflow', tenantId, workflowId],
-    queryFn: () => workflowApi.get(tenantId, workflowId),
+    queryFn: () => workflowApi.get(tenantId, workflowId, { includeGlobal: true }),
     enabled: !!workflowId,
   });
 }
@@ -60,6 +60,29 @@ export function useCreateWorkflow() {
     mutationFn: (definition) => workflowApi.create(tenantId, definition),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['workflows', tenantId] });
+    },
+  });
+}
+
+export function useCreateGlobalWorkflow() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (definition) => workflowApi.createGlobal(definition),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workflows'] });
+    },
+  });
+}
+
+export function useCreateGlobalWorkflowVersion(workflowId) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (definition) => workflowApi.createGlobalVersion(workflowId, definition),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workflow'] });
+      queryClient.invalidateQueries({ queryKey: ['workflowVersions'] });
     },
   });
 }
@@ -81,7 +104,7 @@ export function useWorkflowVersions(workflowId) {
   const { tenantId } = useTenant();
   return useQuery({
     queryKey: ['workflowVersions', tenantId, workflowId],
-    queryFn: () => workflowApi.listVersions(tenantId, workflowId),
+    queryFn: () => workflowApi.listVersions(tenantId, workflowId, { includeGlobal: true }),
     enabled: !!workflowId,
   });
 }
@@ -99,6 +122,18 @@ export function useUpdateWorkflow(workflowId) {
   });
 }
 
+export function useUpdateGlobalWorkflow(workflowId) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (updates) => workflowApi.updateGlobal(workflowId, updates),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workflow'] });
+      queryClient.invalidateQueries({ queryKey: ['workflows'] });
+    },
+  });
+}
+
 export function useDeleteWorkflow() {
   const { tenantId } = useTenant();
   const queryClient = useQueryClient();
@@ -107,6 +142,17 @@ export function useDeleteWorkflow() {
     mutationFn: (workflowId) => workflowApi.delete(tenantId, workflowId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['workflows', tenantId] });
+    },
+  });
+}
+
+export function useDeleteGlobalWorkflow() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (workflowId) => workflowApi.deleteGlobal(workflowId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workflows'] });
     },
   });
 }

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { Plus, Play, Eye, GitBranch, Edit2, Trash2, Clock, Layout } from 'lucide-react';
-import { useWorkflows, useDeleteWorkflow } from '../api/hooks';
+import { useWorkflows, useDeleteWorkflow, useDeleteGlobalWorkflow } from '../api/hooks';
 import { useTenant } from '../context/TenantContext';
 import { Button, Badge, Card, PageSpinner, EmptyState } from '../components/ui';
 import RunWorkflowModal from '../components/RunWorkflowModal';
@@ -15,6 +15,7 @@ export default function WorkflowsPage() {
   const { tenantId } = useTenant();
   const { data: workflows, isLoading, error } = useWorkflows();
   const deleteWorkflow = useDeleteWorkflow();
+  const deleteGlobalWorkflow = useDeleteGlobalWorkflow();
   
   const [runModalOpen, setRunModalOpen] = useState(false);
   const [selectedWorkflow, setSelectedWorkflow] = useState(null);
@@ -48,7 +49,11 @@ export default function WorkflowsPage() {
     }
 
     try {
-      await deleteWorkflow.mutateAsync(workflow.workflowId);
+      if (workflow.scope === 'global') {
+        await deleteGlobalWorkflow.mutateAsync(workflow.workflowId);
+      } else {
+        await deleteWorkflow.mutateAsync(workflow.workflowId);
+      }
       toast.success(`Workflow "${workflow.workflowId}" deleted successfully`);
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed to delete workflow');

@@ -30,9 +30,21 @@ router.use(validateTenant);
 
 router.get('/', async (req, res, next) => {
   try {
-    const { tenantId } = req.params;
-    const workflows = await Workflow.find({ tenantId }).lean();
-    res.json({ workflows });
+     const { tenantId } = req.params;
+    const includeGlobal = req.query.includeGlobal === 'true';
+
+    const tenantWorkflows = await Workflow.find({ tenantId }).lean();
+    if (!includeGlobal) {
+      return res.json({ workflows: tenantWorkflows });
+    }
+
+    const globalWorkflows = await Workflow.find({ scope: 'global', tenantId: null }).lean();
+    const workflowsById = new Map();
+
+    globalWorkflows.forEach((workflow) => workflowsById.set(workflow.workflowId, workflow));
+    tenantWorkflows.forEach((workflow) => workflowsById.set(workflow.workflowId, workflow));
+
+    res.json({ workflows: Array.from(workflowsById.values()) });
   } catch (err) {
     next(err);
   }
@@ -58,6 +70,7 @@ router.post('/', async (req, res, next) => {
 
     const workflow = await Workflow.create({
       tenantId,
+      scope: 'tenant',
       workflowId,
       name: definition.name || definition.description || workflowId,
       latestVersion: version,
@@ -66,6 +79,7 @@ router.post('/', async (req, res, next) => {
 
     await WorkflowVersion.create({
       tenantId,
+      scope: 'tenant',
       workflowId,
       version,
       definitionJson: definition
@@ -80,13 +94,24 @@ router.post('/', async (req, res, next) => {
 router.get('/:workflowId', async (req, res, next) => {
   try {
     const { tenantId, workflowId } = req.params;
-    const workflow = await Workflow.findOne({ tenantId, workflowId }).lean();
+    const includeGlobal = req.query.includeGlobal === 'true';
+
+    let workflow = await Workflow.findOne({ tenantId, workflowId }).lean();
+    if (!workflow && includeGlobal) {
+      workflow = await Workflow.findOne({ scope: 'global', tenantId: null, workflowId }).lean();
+    }
     if (!workflow) return res.status(404).json({ error: 'workflow not found' });
 
+    const scope = workflow.scope || 'tenant';
+    const scopeClause = scope === 'global'
+      ? { scope: 'global' }
+      : { $or: [{ scope: 'tenant' }, { scope: { $exists: false } }] };
+
     const version = await WorkflowVersion.findOne({
-      tenantId,
+      tenantId: workflow.tenantId ?? null,
       workflowId,
-      version: workflow.latestVersion
+      version: workflow.latestVersion,
+      ...scopeClause
     }).lean();
 
     res.json({ workflow, version });
@@ -113,6 +138,7 @@ router.post('/:workflowId/versions', async (req, res, next) => {
 
     await WorkflowVersion.create({
       tenantId,
+      scope: workflow.scope || 'tenant',
       workflowId,
       version,
       definitionJson: definition
@@ -134,7 +160,24 @@ router.post('/:workflowId/versions', async (req, res, next) => {
 router.get('/:workflowId/versions', async (req, res, next) => {
   try {
     const { tenantId, workflowId } = req.params;
-    const versions = await WorkflowVersion.find({ tenantId, workflowId })
+    const includeGlobal = req.query.includeGlobal === 'true';
+
+    let workflow = await Workflow.findOne({ tenantId, workflowId }).lean();
+    if (!workflow && includeGlobal) {
+      workflow = await Workflow.findOne({ scope: 'global', tenantId: null, workflowId }).lean();
+    }
+    if (!workflow) return res.status(404).json({ error: 'workflow not found' });
+
+    const scope = workflow.scope || 'tenant';
+    const scopeClause = scope === 'global'
+      ? { scope: 'global' }
+      : { $or: [{ scope: 'tenant' }, { scope: { $exists: false } }] };
+
+    const versions = await WorkflowVersion.find({
+      tenantId: workflow.tenantId ?? null,
+      workflowId,
+      ...scopeClause
+    })
       .sort({ createdAt: -1 })
       .lean();
     res.json({ versions });

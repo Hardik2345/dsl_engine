@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { WorkflowBuilder, PageSpinner } from '../components';
 import { useQueryClient } from '@tanstack/react-query';
-import { useWorkflow, useCreateWorkflowVersion, useTenants } from '../api/hooks';
+import { useWorkflow, useCreateGlobalWorkflow, useCreateWorkflowVersion, useTenants } from '../api/hooks';
 import { workflowApi } from '../api/endpoints';
 import { useTenant } from '../context/TenantContext';
 import toast from 'react-hot-toast';
@@ -55,6 +55,7 @@ export default function WorkflowBuilderPage() {
   const queryClient = useQueryClient();
   const { tenantId } = useTenant();
   const { data: tenants = [], isLoading: tenantsLoading } = useTenants();
+  const createGlobalWorkflow = useCreateGlobalWorkflow();
   const [scope, setScope] = useState('single'); // 'single' | 'multiple' | 'global'
   const [selectedTenantIds, setSelectedTenantIds] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -94,10 +95,9 @@ export default function WorkflowBuilderPage() {
   }, [tenants]);
 
   const resolvedTenantIds = useMemo(() => {
-    if (scope === 'global') return tenantOptions;
     if (scope === 'multiple') return selectedTenantIds;
     return tenantId ? [tenantId] : [];
-  }, [scope, selectedTenantIds, tenantId, tenantOptions]);
+  }, [scope, selectedTenantIds, tenantId]);
 
   const toggleTenantSelection = (targetTenantId) => {
     setSelectedTenantIds((prev) => {
@@ -161,6 +161,17 @@ export default function WorkflowBuilderPage() {
     }
   };
 
+  const createGlobalWorkflowDefinition = async (definition) => {
+    setIsSubmitting(true);
+
+    try {
+      const result = await createGlobalWorkflow.mutateAsync(definition);
+      return result;
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const handleSave = async (workflowJson) => {
     try {
       if (isEditing) {
@@ -182,7 +193,9 @@ export default function WorkflowBuilderPage() {
         // Remove any placeholder workflow_id to let server generate
         delete workflowJson.workflow_id;
         
-        const result = await createWorkflowsForTenants(workflowJson, resolvedTenantIds);
+        const result = scope === 'global'
+          ? await createGlobalWorkflowDefinition(workflowJson)
+          : await createWorkflowsForTenants(workflowJson, resolvedTenantIds);
         if (result?.workflow?.workflowId) {
           toast.success('Workflow created successfully');
           navigate(`/workflows/${result.workflow.workflowId}`);

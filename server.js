@@ -4,6 +4,7 @@ const cors = require('cors');
 require('dotenv').config();
 
 const workflowRoutes = require('./server/routes/workflows');
+const globalWorkflowRoutes = require('./server/routes/globalWorkflows');
 const runRoutes = require('./server/routes/runs');
 const insightRoutes = require('./server/routes/insights');
 const tenantRoutes = require('./server/routes/tenants');
@@ -23,6 +24,7 @@ app.get('/health', (req, res) => {
 });
 
 app.use('/tenants', tenantRoutes);
+app.use('/workflows/global', globalWorkflowRoutes);
 app.use('/tenants/:tenantId/workflows', workflowRoutes);
 app.use('/tenants/:tenantId/workflows', runRoutes);
 app.use('/tenants/:tenantId/insights', insightRoutes);

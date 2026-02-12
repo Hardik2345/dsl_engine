@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { X, Plus } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useQueryClient } from '@tanstack/react-query';
-import { useTenants } from '../api/hooks';
+import { useCreateGlobalWorkflow, useTenants } from '../api/hooks';
 import { workflowApi } from '../api/endpoints';
 import { useTenant } from '../context/TenantContext';
 import { Button } from './ui';
@@ -59,6 +59,7 @@ export default function CreateWorkflowModal({ onClose }) {
   const queryClient = useQueryClient();
   const { tenantId } = useTenant();
   const { data: tenants = [], isLoading: tenantsLoading } = useTenants();
+  const createGlobalWorkflow = useCreateGlobalWorkflow();
   const [mode, setMode] = useState('form'); // 'form' or 'json'
   const [scope, setScope] = useState('single'); // 'single' | 'multiple' | 'global'
   const [selectedTenantIds, setSelectedTenantIds] = useState([]);
@@ -86,10 +87,9 @@ export default function CreateWorkflowModal({ onClose }) {
   }, [tenants]);
 
   const resolvedTenantIds = useMemo(() => {
-    if (scope === 'global') return tenantOptions;
     if (scope === 'multiple') return selectedTenantIds;
     return tenantId ? [tenantId] : [];
-  }, [scope, selectedTenantIds, tenantId, tenantOptions]);
+  }, [scope, selectedTenantIds, tenantId]);
 
   const toggleTenantSelection = (targetTenantId) => {
     setSelectedTenantIds((prev) => {
@@ -146,6 +146,17 @@ export default function CreateWorkflowModal({ onClose }) {
     }
   };
 
+  const createGlobalWorkflowDefinition = async (definition) => {
+    setIsSubmitting(true);
+
+    try {
+      const result = await createGlobalWorkflow.mutateAsync(definition);
+      return result;
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const handleFormSubmit = async (e) => {
     e.preventDefault();
 
@@ -174,7 +185,9 @@ export default function CreateWorkflowModal({ onClose }) {
     delete definition.workflow_id;
 
     try {
-      const result = await createWorkflowsForTenants(definition, resolvedTenantIds);
+      const result = scope === 'global'
+        ? await createGlobalWorkflowDefinition(definition)
+        : await createWorkflowsForTenants(definition, resolvedTenantIds);
       if (result?.workflow?.workflowId) {
         toast.success('Workflow created successfully');
         onClose();
@@ -194,7 +207,9 @@ export default function CreateWorkflowModal({ onClose }) {
       const definition = JSON.parse(jsonInput);
       setJsonError(null);
 
-      const result = await createWorkflowsForTenants(definition, resolvedTenantIds);
+      const result = scope === 'global'
+        ? await createGlobalWorkflowDefinition(definition)
+        : await createWorkflowsForTenants(definition, resolvedTenantIds);
       if (result?.workflow?.workflowId) {
         toast.success('Workflow created successfully');
         onClose();

@@ -25,7 +25,6 @@ export default function RunWorkflowModal({ workflow, onClose }) {
   };
 
   const [formData, setFormData] = useState({
-    metric: 'cvr',
     windowStart: formatDateForInput(yesterday),
     windowEnd: formatDateForInput(now),
     baselineStart: formatDateForInput(weekAgoYesterday),
@@ -38,7 +37,7 @@ export default function RunWorkflowModal({ workflow, onClose }) {
     const context = {
       meta: {
         tenantId,
-        metric: formData.metric,
+        metric: 'cvr',
         window: {
           start: formatDateForApi(formData.windowStart),
           end: formatDateForApi(formData.windowEnd),
@@ -90,23 +89,6 @@ export default function RunWorkflowModal({ workflow, onClose }) {
           <div className="px-6 py-4 space-y-4">
             <div className="text-sm text-gray-500 mb-4">
               Running <span className="font-medium text-gray-900">{workflow.workflowId}</span>
-            </div>
-
-            {/* Metric */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Metric
-              </label>
-              <select
-                value={formData.metric}
-                onChange={(e) => setFormData({ ...formData, metric: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
-              >
-                <option value="cvr">CVR (Conversion Rate)</option>
-                <option value="revenue">Revenue</option>
-                <option value="orders">Orders</option>
-                <option value="sessions">Sessions</option>
-              </select>
             </div>
 
             {/* Analysis Window */}

@@ -20,14 +20,23 @@ router.post('/:workflowId/runs', async (req, res, next) => {
       return res.status(400).json({ error: 'tenantId mismatch in context' });
     }
 
-    const workflow = await Workflow.findOne({ tenantId, workflowId }).lean();
+    let workflow = await Workflow.findOne({ tenantId, workflowId }).lean();
+    if (!workflow) {
+      workflow = await Workflow.findOne({ scope: 'global', tenantId: null, workflowId }).lean();
+    }
     if (!workflow) return res.status(404).json({ error: 'workflow not found' });
 
     const versionId = version || workflow.latestVersion;
+    const scope = workflow.scope || 'tenant';
+    const scopeClause = scope === 'global'
+      ? { scope: 'global' }
+      : { $or: [{ scope: 'tenant' }, { scope: { $exists: false } }] };
+
     const workflowVersion = await WorkflowVersion.findOne({
-      tenantId,
+      tenantId: workflow.tenantId ?? null,
       workflowId,
-      version: versionId
+      version: versionId,
+      ...scopeClause
     }).lean();
     if (!workflowVersion) {
       return res.status(404).json({ error: 'workflow version not found' });
