@@ -180,7 +180,7 @@ export default function WorkflowDetailPage() {
                 Versions
               </CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="max-h-64 overflow-y-auto">
               {versions?.length === 0 ? (
                 <p className="text-sm text-gray-500">No versions found</p>
               ) : (

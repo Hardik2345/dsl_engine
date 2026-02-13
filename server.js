@@ -23,6 +23,15 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
+// Version check endpoint - update this timestamp on each deploy to verify
+app.get('/version', (req, res) => {
+  res.json({ 
+    version: '1.0.1',
+    deployedAt: '2026-02-13T17:00:00Z',
+    features: ['atc_sessions_delta_pct', 'branch_rule_evaluations']
+  });
+});
+
 app.use('/tenants', tenantRoutes);
 app.use('/workflows/global', globalWorkflowRoutes);
 app.use('/tenants/:tenantId/workflows', workflowRoutes);
