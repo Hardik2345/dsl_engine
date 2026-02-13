@@ -68,7 +68,7 @@
     {
       "id": "landing_page_breakdown",
       "type": "recursive_dimension_breakdown",
-      "dimensions": ["landing_page_path"],
+      "dimensions": ["landing_page_path", "product_id"],
       "base_metric": "atc_rate",
       "stop_conditions": {
         "max_depth": 1,

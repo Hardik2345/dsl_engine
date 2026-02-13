@@ -46,11 +46,19 @@ function WorkflowBuilderContent({
 
         // Styling for Rule connections (Branch Node)
         if (params.sourceHandle && params.sourceHandle.startsWith('handle-rule-')) {
-             const ruleIdx = params.sourceHandle.split('-')[2];
+             // Extract rule ID (format: handle-rule-{ruleId})
+             const ruleId = params.sourceHandle.replace('handle-rule-', '');
+             
+             // Find the source node to get the rule index for labeling
+             const sourceNode = nodes.find(n => n.id === params.source);
+             const ruleIndex = sourceNode?.data?.rules?.findIndex(r => 
+               (r._ruleId || `legacy_rule_${sourceNode.data.rules.indexOf(r)}`) === ruleId
+             ) ?? 0;
+             
              newEdge = { 
                 ...newEdge, 
                 style: { stroke: '#9333ea' },
-                label: `Rule ${parseInt(ruleIdx) + 1}`,
+                label: `Rule ${ruleIndex + 1}`,
              };
         } 
         // Styling for Default path (Branch Node)
@@ -68,7 +76,7 @@ function WorkflowBuilderContent({
         
         setEdges((eds) => addEdge(newEdge, eds));
     },
-    [setEdges],
+    [setEdges, nodes],
   );
 
   const onNodeClick = useCallback((event, node) => {
@@ -76,8 +84,29 @@ function WorkflowBuilderContent({
   }, []);
 
   const handleNodeUpdate = (id, newData) => {
-    setNodes((nds) =>
-      nds.map((node) => {
+    setNodes((nds) => {
+      const oldNode = nds.find(n => n.id === id);
+      
+      // Check if this is a branch node with deleted rules - clean up orphaned edges
+      if (oldNode?.data?.rules && newData.rules) {
+        const oldRuleIds = new Set(oldNode.data.rules.map((r, idx) => r._ruleId || `legacy_rule_${idx}`));
+        const newRuleIds = new Set(newData.rules.map((r, idx) => r._ruleId || `legacy_rule_${idx}`));
+        
+        // Find deleted rule IDs
+        const deletedRuleIds = [...oldRuleIds].filter(rId => !newRuleIds.has(rId));
+        
+        if (deletedRuleIds.length > 0) {
+          // Remove edges connected to deleted rules
+          setEdges((eds) => eds.filter(e => {
+            if (e.source !== id) return true;
+            if (!e.sourceHandle?.startsWith('handle-rule-')) return true;
+            const edgeRuleId = e.sourceHandle.replace('handle-rule-', '');
+            return !deletedRuleIds.includes(edgeRuleId);
+          }));
+        }
+      }
+      
+      return nds.map((node) => {
         if (node.id === id) {
           // If ID changed in data, we might need to update node.id too, 
           // but React Flow prefers stable IDs. Ideally keep display ID separate from internal ID.
@@ -85,8 +114,8 @@ function WorkflowBuilderContent({
           return { ...node, data: newData };
         }
         return node;
-      })
-    );
+      });
+    });
     // Update local selection state too
     setSelectedNode((prev) => ({ ...prev, data: newData }));
   };

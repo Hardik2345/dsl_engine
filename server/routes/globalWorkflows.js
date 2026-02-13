@@ -39,7 +39,7 @@ router.post('/', async (req, res, next) => {
       tenantId: null,
       scope: 'global',
       workflowId,
-      name: definition.name || definition.description || workflowId,
+      name: definition.name || workflowId,
       latestVersion: version,
       isActive: true
     });
@@ -103,8 +103,8 @@ router.post('/:workflowId/versions', async (req, res, next) => {
     });
 
     workflow.latestVersion = version;
-    if (definition.description) {
-      workflow.name = definition.description;
+    if (definition.name) {
+      workflow.name = definition.name;
     }
     await workflow.save();
 

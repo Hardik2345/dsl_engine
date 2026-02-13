@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { WorkflowBuilder, PageSpinner } from '../components';
 import { useQueryClient } from '@tanstack/react-query';
-import { useWorkflow, useCreateGlobalWorkflow, useCreateWorkflowVersion, useTenants } from '../api/hooks';
+import { useWorkflow, useCreateGlobalWorkflow, useCreateWorkflowVersion, useCreateGlobalWorkflowVersion, useTenants } from '../api/hooks';
 import { workflowApi } from '../api/endpoints';
 import { useTenant } from '../context/TenantContext';
 import toast from 'react-hot-toast';
@@ -63,8 +63,12 @@ export default function WorkflowBuilderPage() {
   // Hooks for fetching (if editing)
   const { data: workflowData, isLoading, error } = useWorkflow(workflowId);
 
+  // Determine if editing a global workflow
+  const isGlobalWorkflow = workflowData?.workflow?.scope === 'global';
+
   // Hooks for mutations
   const createVersion = useCreateWorkflowVersion(workflowId);
+  const createGlobalVersion = useCreateGlobalWorkflowVersion(workflowId);
 
   if (isEditing && isLoading) return <PageSpinner />;
   
@@ -185,7 +189,12 @@ export default function WorkflowBuilderPage() {
         // Ensure workflow_id matches
         workflowJson.workflow_id = workflowId;
 
-        await createVersion.mutateAsync(workflowJson);
+        // Use appropriate mutation based on workflow scope
+        if (isGlobalWorkflow) {
+          await createGlobalVersion.mutateAsync(workflowJson);
+        } else {
+          await createVersion.mutateAsync(workflowJson);
+        }
         toast.success(`New version ${newVersion} saved successfully`);
         navigate(`/workflows/${workflowId}`);
       } else {

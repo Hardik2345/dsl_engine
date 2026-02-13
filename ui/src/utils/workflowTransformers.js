@@ -5,6 +5,12 @@ import { MarkerType } from '@xyflow/react';
 const NODE_WIDTH = 250;
 const NODE_HEIGHT = 80;
 
+// Generate unique ID for rules (for backward compatibility when loading)
+const generateRuleId = () => `rule_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+
+// Ensure a rule has an ID - used for backward compatibility
+const ensureRuleId = (rule, idx) => rule._ruleId || `legacy_rule_${idx}`;
+
 /**
  * Converts Backend JSON format to React Flow elements (Nodes + Edges)
  */
@@ -26,6 +32,15 @@ export const jsonToGraph = (workflowJson) => {
     if (n.type === 'composite') type = 'composite';
     if (n.id === 'trigger') type = 'trigger'; // hypothetical
 
+    // For branch nodes, ensure each rule has a stable _ruleId
+    let nodeData = { ...n };
+    if (n.type === 'branch' && Array.isArray(n.rules)) {
+      nodeData.rules = n.rules.map((rule, idx) => ({
+        ...rule,
+        _ruleId: rule._ruleId || generateRuleId()
+      }));
+    }
+
     // Create the node object
     const flowNode = {
       id: n.id,
@@ -33,7 +48,7 @@ export const jsonToGraph = (workflowJson) => {
       position: { x: 0, y: 0 }, // Will be calculated by layout engine
       data: { 
         // Pass original definition as data
-        ...n,
+        ...nodeData,
         label: n.id // Default label
       },
     };
@@ -57,12 +72,17 @@ export const jsonToGraph = (workflowJson) => {
 
     // Branch nodes have routing logic
     if (n.type === 'branch' && n.rules) {
-      n.rules.forEach((rule, index) => {
+      // Get the rules with IDs from the node we created (which has _ruleId assigned)
+      const nodeWithRuleIds = nodeMap.get(n.id);
+      const rulesWithIds = nodeWithRuleIds?.data?.rules || n.rules;
+      
+      rulesWithIds.forEach((rule, index) => {
+        const ruleId = rule._ruleId || `legacy_rule_${index}`;
         if (rule.then) {
           edges.push({
-            id: `${n.id}-rule-${index}-${rule.then}`,
+            id: `${n.id}-rule-${ruleId}-${rule.then}`,
             source: n.id,
-            sourceHandle: `handle-rule-${index}`, // Specific handle for this rule
+            sourceHandle: `handle-rule-${ruleId}`, // Use rule ID for stable handle
             target: rule.then,
             type: 'deletable',
             label: `Rule ${index + 1}`,
@@ -159,14 +179,18 @@ export const graphToJson = (nodes, edges, initialMetadata) => {
       // Here we mostly valid structure or update 'then' pointers if edges changed
       
       // Update rules 'then' targets based on edges connected to specific handles
+      // Deep clone rules to avoid mutating React state
       if (backendNode.rules) {
-        backendNode.rules.forEach((rule, idx) => {
-            const ruleEdge = outgoingEdges.find(e => e.sourceHandle === `handle-rule-${idx}`);
+        backendNode.rules = backendNode.rules.map((rule, idx) => {
+            const ruleId = rule._ruleId || `legacy_rule_${idx}`;
+            const ruleEdge = outgoingEdges.find(e => e.sourceHandle === `handle-rule-${ruleId}`);
+            const newRule = { ...rule };
             if (ruleEdge && idMap.has(ruleEdge.target)) {
-                rule.then = idMap.get(ruleEdge.target);
+                newRule.then = idMap.get(ruleEdge.target);
             } else {
-                delete rule.then; 
+                delete newRule.then; 
             }
+            return newRule;
         });
       }
       

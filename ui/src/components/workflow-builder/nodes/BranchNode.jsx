@@ -2,6 +2,9 @@ import React from 'react';
 import { Handle, Position } from '@xyflow/react';
 import { GitFork } from 'lucide-react';
 
+// Generate a stable rule ID if missing (for backward compatibility)
+const ensureRuleId = (rule, idx) => rule._ruleId || `legacy_rule_${idx}`;
+
 export const BranchNode = ({ data, isConnectable }) => {
   const rules = data.rules || [];
 
@@ -17,6 +20,7 @@ export const BranchNode = ({ data, isConnectable }) => {
       <div className="p-2 space-y-2">
         {/* Render Handles for Rules */}
         {rules.map((rule, idx) => {
+            const ruleId = ensureRuleId(rule, idx);
             const isBreakdownsRule = !!rule.any_in_breakdowns;
             const firstCondition = isBreakdownsRule
               ? rule.any_in_breakdowns?.conditions?.[0]
@@ -24,7 +28,7 @@ export const BranchNode = ({ data, isConnectable }) => {
             const isOr = !isBreakdownsRule && rule.any && rule.any.length > 0;
             
             return (
-              <div key={idx} className="relative flex items-center justify-end bg-purple-50 p-2 rounded text-xs border border-purple-100">
+              <div key={ruleId} className="relative flex items-center justify-end bg-purple-50 p-2 rounded text-xs border border-purple-100">
                 <span className="mr-4 text-purple-800 font-mono flex items-center gap-1">
                   <span className="font-bold mr-1">
                     {isBreakdownsRule ? 'ANY' : (isOr ? 'OR' : 'AND')}
@@ -50,7 +54,7 @@ export const BranchNode = ({ data, isConnectable }) => {
                 <Handle
                   type="source"
                   position={Position.Right}
-                  id={`handle-rule-${idx}`}
+                  id={`handle-rule-${ruleId}`}
                   isConnectable={isConnectable}
                   className="!bg-purple-500"
                   style={{ right: '-8px' }}
