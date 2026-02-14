@@ -1,7 +1,8 @@
 import { useParams, Link } from 'react-router-dom';
 import { ArrowLeft, Play, RefreshCw } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
-import { useWorkflowRuns } from '../api/hooks';
+import { useWorkflowRuns, useExecuteWorkflow } from '../api/hooks';
+import toast from 'react-hot-toast';
 import { Button, Badge, Card, PageSpinner, EmptyState } from '../components/ui';
 import { useState } from 'react';
 import RunWorkflowModal from '../components/RunWorkflowModal';
@@ -9,7 +10,25 @@ import RunWorkflowModal from '../components/RunWorkflowModal';
 export default function WorkflowRunsPage() {
   const { workflowId } = useParams();
   const { data: runs, isLoading, error, refetch } = useWorkflowRuns(workflowId);
+  const executeWorkflow = useExecuteWorkflow(workflowId);
   const [runModalOpen, setRunModalOpen] = useState(false);
+  const [rerunningRunId, setRerunningRunId] = useState(null);
+
+  const handleRerun = async (run) => {
+    setRerunningRunId(run._id);
+    try {
+      const result = await executeWorkflow.mutateAsync({
+        context: run.context,
+      });
+      toast.success(`Workflow rerun started: ${result.runId}`);
+      // Explicitly refetch to update the list immediately
+      refetch();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to rerun workflow');
+    } finally {
+      setRerunningRunId(null);
+    }
+  };
 
   if (isLoading) return <PageSpinner />;
 
@@ -145,12 +164,23 @@ export default function WorkflowRunsPage() {
                       <div className="text-xs text-gray-400">
                         {run.startedAt
                           ? formatDistanceToNow(new Date(run.startedAt), {
-                              addSuffix: true,
-                            })
+                            addSuffix: true,
+                          })
                           : ''}
                       </div>
                     </td>
-                    <td className="py-4 px-6 text-right">
+                    <td className="py-4 px-6 text-right flex justify-end gap-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleRerun(run)}
+                        loading={rerunningRunId === run._id}
+                        className="text-primary-600 hover:text-primary-700 hover:bg-primary-50"
+                        title="Rerun with same parameters"
+                      >
+                        <Play className="w-4 h-4 mr-1 fill-current" />
+                        Rerun
+                      </Button>
                       <Link to={`/workflows/${workflowId}/runs/${run._id}`}>
                         <Button variant="ghost" size="sm">
                           View Details

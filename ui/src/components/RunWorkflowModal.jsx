@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { X, Play } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -17,7 +17,9 @@ export default function RunWorkflowModal({ workflow, onClose }) {
   const weekAgoYesterday = new Date(weekAgo.getTime() - 24 * 60 * 60 * 1000);
 
   const formatDateForInput = (date) => {
-    return date.toISOString().slice(0, 16);
+    // Offset manual calculation to preserve local time (IST) in ISO format
+    const tzOffset = date.getTimezoneOffset() * 60000;
+    return new Date(date.getTime() - tzOffset).toISOString().slice(0, 16);
   };
 
   const formatDateForApi = (dateStr) => {
@@ -30,6 +32,48 @@ export default function RunWorkflowModal({ workflow, onClose }) {
     baselineStart: formatDateForInput(weekAgoYesterday),
     baselineEnd: formatDateForInput(weekAgo),
   });
+
+  const [usePreviousPeriod, setUsePreviousPeriod] = useState(false);
+  const [previousBaselineDates, setPreviousBaselineDates] = useState(null);
+
+  const handleCheckboxChange = (e) => {
+    const checked = e.target.checked;
+    if (checked) {
+      // Store current dates before they are overwritten by sync
+      setPreviousBaselineDates({
+        baselineStart: formData.baselineStart,
+        baselineEnd: formData.baselineEnd,
+      });
+    } else if (previousBaselineDates) {
+      // Restore previous dates when unchecking
+      setFormData((prev) => ({
+        ...prev,
+        baselineStart: previousBaselineDates.baselineStart,
+        baselineEnd: previousBaselineDates.baselineEnd,
+      }));
+      setPreviousBaselineDates(null);
+    }
+    setUsePreviousPeriod(checked);
+  };
+
+  useEffect(() => {
+    if (usePreviousPeriod && formData.windowStart && formData.windowEnd) {
+      const start = new Date(formData.windowStart);
+      const end = new Date(formData.windowEnd);
+      const duration = end.getTime() - start.getTime();
+
+      if (duration > 0) {
+        const baselineEnd = start;
+        const baselineStart = new Date(start.getTime() - duration);
+
+        setFormData(prev => ({
+          ...prev,
+          baselineStart: formatDateForInput(baselineStart),
+          baselineEnd: formatDateForInput(baselineEnd)
+        }));
+      }
+    }
+  }, [usePreviousPeriod, formData.windowStart, formData.windowEnd]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -118,6 +162,20 @@ export default function RunWorkflowModal({ workflow, onClose }) {
               </div>
             </div>
 
+            {/* Previous Period Checkbox */}
+            <div className="flex items-center gap-2 py-1">
+              <input
+                type="checkbox"
+                id="usePreviousPeriod"
+                checked={usePreviousPeriod}
+                onChange={handleCheckboxChange}
+                className="w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
+              />
+              <label htmlFor="usePreviousPeriod" className="text-sm font-medium text-gray-700 cursor-pointer">
+                Select Previous Period for Baseline
+              </label>
+            </div>
+
             {/* Baseline Window */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -129,7 +187,11 @@ export default function RunWorkflowModal({ workflow, onClose }) {
                   <input
                     type="datetime-local"
                     value={formData.baselineStart}
-                    onChange={(e) => setFormData({ ...formData, baselineStart: e.target.value })}
+                    onChange={(e) => {
+                      setFormData({ ...formData, baselineStart: e.target.value });
+                      setUsePreviousPeriod(false);
+                      setPreviousBaselineDates(null);
+                    }}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-sm"
                   />
                 </div>
@@ -138,7 +200,11 @@ export default function RunWorkflowModal({ workflow, onClose }) {
                   <input
                     type="datetime-local"
                     value={formData.baselineEnd}
-                    onChange={(e) => setFormData({ ...formData, baselineEnd: e.target.value })}
+                    onChange={(e) => {
+                      setFormData({ ...formData, baselineEnd: e.target.value });
+                      setUsePreviousPeriod(false);
+                      setPreviousBaselineDates(null);
+                    }}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-sm"
                   />
                 </div>
