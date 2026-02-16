@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { X, Plus, Trash2 } from 'lucide-react';
+import SuggestionInput from '../SuggestionInput';
 
 // Generate unique ID for rules
 const generateRuleId = () => `rule_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
@@ -62,7 +63,9 @@ const INSIGHT_TOKENS = [
   'top_baseline_atc_sessions',
   'top_current_atc_rate_pct',
   'top_baseline_atc_rate_pct',
-  'top_sessions_delta_pct_fmt'
+  'top_sessions_delta_pct_fmt',
+  'baseline_top5_pages',
+  'baseline_bottom5_pages'
 ];
 
 const METRIC_OPTIONS = [
@@ -71,6 +74,39 @@ const METRIC_OPTIONS = [
   'cvr',
   'atc_rate',
   'atc_sessions'
+];
+
+const RANK_BY_OPTIONS = [
+  { value: 'delta', label: 'Delta (default)' },
+  { value: 'baseline_cvr', label: 'Baseline CVR' },
+  { value: 'baseline_sessions', label: 'Baseline Sessions' },
+  { value: 'baseline_orders', label: 'Baseline Orders' }
+];
+
+const RANK_ORDER_OPTIONS = [
+  { value: 'desc', label: 'Descending' },
+  { value: 'asc', label: 'Ascending' }
+];
+
+const FILTER_MODE_OPTIONS = [
+  { value: 'drop', label: 'Drops only' },
+  { value: 'increase', label: 'Increases only' },
+  { value: 'all', label: 'All' }
+];
+
+const MIN_SESSIONS_MODE_OPTIONS = [
+  { value: 'both_low', label: 'Skip only if both are low' },
+  { value: 'either_low', label: 'Skip if either is low' },
+  { value: 'baseline_only', label: 'Require baseline only' }
+];
+
+const OUTPUT_KEY_SUGGESTIONS = [
+  'baseline_top5_pages',
+  'baseline_bottom5_pages',
+  'top_pages',
+  'bottom_pages',
+  'top_segments',
+  'bottom_segments'
 ];
 
 const DIMENSION_OPTIONS = [
@@ -237,13 +273,8 @@ function MetricMultiSelect({ value, onChange, placeholder }) {
 
 function DimensionMultiSelect({ value, onChange, placeholder }) {
   const [inputValue, setInputValue] = useState('');
-  const [isOpen, setIsOpen] = useState(false);
-  const [isFocused, setIsFocused] = useState(false);
   const normalizedValue = Array.isArray(value) ? value : [];
   const available = DIMENSION_OPTIONS.filter((d) => !normalizedValue.includes(d));
-  const suggestions = inputValue
-    ? available.filter((d) => d.startsWith(inputValue.toLowerCase()))
-    : available;
 
   const addDimension = (dimension) => {
     if (!dimension || normalizedValue.includes(dimension)) return;
@@ -253,22 +284,6 @@ function DimensionMultiSelect({ value, onChange, placeholder }) {
 
   const removeDimension = (dimension) => {
     onChange(normalizedValue.filter((d) => d !== dimension));
-  };
-
-  const handleKeyDown = (e) => {
-    if (e.key === 'Enter' || e.key === ',') {
-      e.preventDefault();
-      const trimmed = inputValue.trim().toLowerCase();
-      if (DIMENSION_OPTIONS.includes(trimmed)) {
-        addDimension(trimmed);
-      }
-    }
-    if (e.key === 'Backspace' && !inputValue && normalizedValue.length) {
-      removeDimension(normalizedValue[normalizedValue.length - 1]);
-    }
-    if (e.key === 'Escape') {
-      setIsOpen(false);
-    }
   };
 
   return (
@@ -287,60 +302,35 @@ function DimensionMultiSelect({ value, onChange, placeholder }) {
           </span>
         ))}
       </div>
-      <div className="relative">
-        <input
-          type="text"
-          className="w-full border text-sm p-1 rounded"
-          value={inputValue}
-          onChange={(e) => {
-            const next = e.target.value;
-            setInputValue(next);
-            if (isFocused) setIsOpen(true);
-          }}
-          onKeyDown={handleKeyDown}
-          onFocus={() => {
-            setIsFocused(true);
-            setIsOpen(true);
-          }}
-          onBlur={() => {
-            setIsFocused(false);
-            setTimeout(() => setIsOpen(false), 100);
-          }}
-          placeholder={placeholder}
-        />
-        {isOpen && suggestions.length > 0 && (
-          <div className="absolute z-10 mt-1 w-full max-h-28 overflow-y-auto rounded border border-gray-200 bg-white shadow-sm text-xs">
-            <div className="flex items-center justify-between px-2 py-1 border-b border-gray-100 bg-white sticky top-0">
-              <span className="text-[10px] text-gray-400">Suggestions</span>
-              <button
-                type="button"
-                className="text-[10px] text-gray-500 hover:text-gray-700"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => setIsOpen(false)}
-              >
-                Close
-              </button>
-            </div>
-            {suggestions.map((dimension) => (
-              <button
-                type="button"
-                key={dimension}
-                className="w-full text-left px-2 py-1 hover:bg-gray-50"
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  addDimension(dimension);
-                }}
-              >
-                {dimension}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-      <div className="text-[10px] text-gray-400">
-        Supported: {DIMENSION_OPTIONS.join(', ')}
-      </div>
+      <SuggestionInput
+        value={inputValue}
+        onChange={(next) => setInputValue(next)}
+        onSubmit={(next) => {
+          const trimmed = next.trim().toLowerCase();
+          if (DIMENSION_OPTIONS.includes(trimmed)) {
+            addDimension(trimmed);
+          }
+        }}
+        onPick={(next) => addDimension(next)}
+        placeholder={placeholder}
+        suggestions={available}
+        footerLabel="Supported"
+      />
     </div>
+  );
+}
+
+function OutputKeyInput({ value, onChange, placeholder }) {
+  return (
+    <SuggestionInput
+      value={value}
+      onChange={onChange}
+      onSubmit={(next) => onChange(next.trim())}
+      onPick={(next) => onChange(next)}
+      placeholder={placeholder}
+      suggestions={OUTPUT_KEY_SUGGESTIONS}
+      footerLabel="Suggestions"
+    />
   );
 }
 
@@ -443,6 +433,17 @@ export default function PropertiesPanel({ selectedNode, onChange, onClose, onDel
     const newData = { ...data, [field]: value };
     setData(newData);
     onChange(selectedNode.id, newData);
+  };
+  const handleStopConditionChange = (field, value, parseFn) => {
+    const current = data.stop_conditions || {};
+    const next = { ...current };
+    if (value === '' || value === null || value === undefined) {
+      delete next[field];
+    } else {
+      const parsed = parseFn ? parseFn(value) : Number(value);
+      next[field] = Number.isNaN(parsed) ? value : parsed;
+    }
+    handleChange('stop_conditions', next);
   };
 
   if (!selectedNode) {
@@ -904,16 +905,144 @@ export default function PropertiesPanel({ selectedNode, onChange, onClose, onDel
                                   <option key={metric} value={metric}>{metric}</option>
                                 ))}
                             </select>
-                        </div>
-                        <div>
-                             <label className="block text-xs font-medium text-gray-500 mb-1">Dimensions (comma separated)</label>
-                             <DimensionMultiSelect
-                                value={data.dimensions || []}
-                                onChange={(nextValue) => handleChange('dimensions', nextValue)}
-                                placeholder="Add dimension..."
-                             />
-                        </div>
-                    </>
+                     </div>
+                     <div>
+                          <label className="block text-xs font-medium text-gray-500 mb-1">Dimensions (comma separated)</label>
+                          <DimensionMultiSelect
+                             value={data.dimensions || []}
+                             onChange={(nextValue) => handleChange('dimensions', nextValue)}
+                             placeholder="Add dimension..."
+                          />
+                     </div>
+                     <div>
+                          <label className="block text-xs font-medium text-gray-500 mb-1">Rank By</label>
+                          <select
+                              className="w-full border text-sm p-1 rounded"
+                              value={data.rank_by || 'delta'}
+                              onChange={(e) => handleChange('rank_by', e.target.value)}
+                          >
+                              {RANK_BY_OPTIONS.map((opt) => (
+                                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                              ))}
+                          </select>
+                     </div>
+                     <div>
+                          <label className="block text-xs font-medium text-gray-500 mb-1">Rank Order</label>
+                          <select
+                              className="w-full border text-sm p-1 rounded"
+                              value={data.rank_order || 'desc'}
+                              onChange={(e) => handleChange('rank_order', e.target.value)}
+                          >
+                              {RANK_ORDER_OPTIONS.map((opt) => (
+                                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                              ))}
+                          </select>
+                     </div>
+                     <div>
+                          <label className="block text-xs font-medium text-gray-500 mb-1">Filter Mode</label>
+                          <select
+                              className="w-full border text-sm p-1 rounded"
+                              value={data.filter_mode || 'drop'}
+                              onChange={(e) => handleChange('filter_mode', e.target.value)}
+                          >
+                              {FILTER_MODE_OPTIONS.map((opt) => (
+                                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                              ))}
+                          </select>
+                     </div>
+                     <div>
+                          <label className="block text-xs font-medium text-gray-500 mb-1">Min Sessions Mode</label>
+                          <select
+                              className="w-full border text-sm p-1 rounded"
+                              value={data.min_sessions_mode || 'both_low'}
+                              onChange={(e) => handleChange('min_sessions_mode', e.target.value)}
+                          >
+                              {MIN_SESSIONS_MODE_OPTIONS.map((opt) => (
+                                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                              ))}
+                          </select>
+                     </div>
+                     <div>
+                          <label className="block text-xs font-medium text-gray-500 mb-1">Output Key (optional)</label>
+                          <OutputKeyInput
+                              value={data.output_key || ''}
+                              onChange={(nextValue) => handleChange('output_key', nextValue)}
+                              placeholder="baseline_top5_pages"
+                          />
+                     </div>
+                     <div className="pt-2 border-t">
+                          <div className="text-xs font-medium text-gray-600 mb-2">Stop Conditions</div>
+                          <div className="space-y-2">
+                              <div>
+                                  <label className="block text-[11px] font-medium text-gray-500 mb-1">Max Depth</label>
+                                  <input
+                                      type="number"
+                                      min="1"
+                                      className="w-full border text-sm p-1 rounded"
+                                      value={data.stop_conditions?.max_depth ?? ''}
+                                      onChange={(e) => handleStopConditionChange('max_depth', e.target.value, (v) => parseInt(v, 10))}
+                                      placeholder="1"
+                                  />
+                              </div>
+                              <div>
+                                  <label className="block text-[11px] font-medium text-gray-500 mb-1">Top K</label>
+                                  <input
+                                      type="number"
+                                      min="1"
+                                      className="w-full border text-sm p-1 rounded"
+                                      value={data.stop_conditions?.top_k ?? ''}
+                                      onChange={(e) => handleStopConditionChange('top_k', e.target.value, (v) => parseInt(v, 10))}
+                                      placeholder="5"
+                                  />
+                              </div>
+                              <div>
+                                  <label className="block text-[11px] font-medium text-gray-500 mb-1">Min Sessions (default)</label>
+                                  <input
+                                      type="number"
+                                      min="0"
+                                      className="w-full border text-sm p-1 rounded"
+                                      value={data.stop_conditions?.min_sessions ?? ''}
+                                      onChange={(e) => handleStopConditionChange('min_sessions', e.target.value, (v) => parseFloat(v))}
+                                      placeholder="50"
+                                  />
+                              </div>
+                              <div>
+                                  <label className="block text-[11px] font-medium text-gray-500 mb-1">Min Current Sessions</label>
+                                  <input
+                                      type="number"
+                                      min="0"
+                                      className="w-full border text-sm p-1 rounded"
+                                      value={data.stop_conditions?.min_current_sessions ?? ''}
+                                      onChange={(e) => handleStopConditionChange('min_current_sessions', e.target.value, (v) => parseFloat(v))}
+                                      placeholder="50"
+                                  />
+                              </div>
+                              <div>
+                                  <label className="block text-[11px] font-medium text-gray-500 mb-1">Min Baseline Sessions</label>
+                                  <input
+                                      type="number"
+                                      min="0"
+                                      className="w-full border text-sm p-1 rounded"
+                                      value={data.stop_conditions?.min_baseline_sessions ?? ''}
+                                      onChange={(e) => handleStopConditionChange('min_baseline_sessions', e.target.value, (v) => parseFloat(v))}
+                                      placeholder="50"
+                                  />
+                              </div>
+                              <div>
+                                  <label className="block text-[11px] font-medium text-gray-500 mb-1">Min Impact %</label>
+                                  <input
+                                      type="number"
+                                      min="0"
+                                      step="0.01"
+                                      className="w-full border text-sm p-1 rounded"
+                                      value={data.stop_conditions?.min_impact_pct ?? ''}
+                                      onChange={(e) => handleStopConditionChange('min_impact_pct', e.target.value, (v) => parseFloat(v))}
+                                      placeholder="5"
+                                  />
+                              </div>
+                          </div>
+                     </div>
+                  </>
                  )}
              </div>
           );

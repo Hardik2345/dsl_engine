@@ -70,19 +70,6 @@ export default function WorkflowBuilderPage() {
   const createVersion = useCreateWorkflowVersion(workflowId);
   const createGlobalVersion = useCreateGlobalWorkflowVersion(workflowId);
 
-  if (isEditing && isLoading) return <PageSpinner />;
-  
-  if (isEditing && error) {
-    return (
-      <div className="text-center py-12">
-        <p className="text-red-500">Error loading workflow: {error.message}</p>
-        <button onClick={() => navigate('/workflows')} className="text-blue-500 underline mt-4">
-          Go back
-        </button>
-      </div>
-    );
-  }
-
   const initialData = isEditing 
         ? {
             ...(workflowData?.version?.definitionJson || NEW_WORKFLOW_TEMPLATE),
@@ -223,20 +210,31 @@ export default function WorkflowBuilderPage() {
 
   return (
     <div className="h-screen w-full bg-white">
-      <WorkflowBuilder 
-        initialData={initialData}
-        onSave={handleSave}
-        onBack={() => navigate(isEditing ? `/workflows/${workflowId}` : '/workflows')}
-        isEditing={isEditing}
-        scope={scope}
-        onScopeChange={handleScopeChange}
-        tenantOptions={tenantOptions}
-        selectedTenantIds={selectedTenantIds}
-        onToggleTenant={toggleTenantSelection}
-        tenantsLoading={tenantsLoading}
-        currentTenantId={tenantId}
-        isSaving={isSubmitting}
-      />
+      {isEditing && isLoading ? (
+        <PageSpinner />
+      ) : isEditing && error ? (
+        <div className="text-center py-12">
+          <p className="text-red-500">Error loading workflow: {error.message}</p>
+          <button onClick={() => navigate('/workflows')} className="text-blue-500 underline mt-4">
+            Go back
+          </button>
+        </div>
+      ) : (
+        <WorkflowBuilder 
+          initialData={initialData}
+          onSave={handleSave}
+          onBack={() => navigate(isEditing ? `/workflows/${workflowId}` : '/workflows')}
+          isEditing={isEditing}
+          scope={scope}
+          onScopeChange={handleScopeChange}
+          tenantOptions={tenantOptions}
+          selectedTenantIds={selectedTenantIds}
+          onToggleTenant={toggleTenantSelection}
+          tenantsLoading={tenantsLoading}
+          currentTenantId={tenantId}
+          isSaving={isSubmitting}
+        />
+      )}
     </div>
   );
 }

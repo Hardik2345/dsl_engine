@@ -1,0 +1,95 @@
+{
+  "workflow_id": "landing_page_cvr_baseline_rank",
+  "workflow_type": "root_cause_analysis",
+  "description": "Top baseline CVR landing pages (best and worst) with session deltas",
+  "version": "1.0",
+
+  "trigger": {
+    "type": "manual",
+    "metric": "cvr",
+    "condition": {
+      "operator": ">",
+      "delta_pct": 0
+    },
+    "window": {
+      "type": "rolling",
+      "duration": "1h"
+    }
+  },
+
+  "context": {
+    "tenant_id": "{{tenant_id}}",
+    "brand_id": "{{brand_id}}",
+    "baseline_window": "previous_day_same_hour",
+    "currency": "{{brand_currency}}"
+  },
+
+  "nodes": [
+    {
+      "id": "data_sanity_check",
+      "type": "validation",
+      "checks": [
+        { "field": "sessions", "condition": "current >= 0" }
+      ],
+      "on_fail": {
+        "action": "terminate",
+        "reason": "Insufficient data for baseline CVR ranking"
+      },
+      "next": "baseline_top5_pages"
+    },
+
+    {
+      "id": "baseline_top5_pages",
+      "type": "recursive_dimension_breakdown",
+      "dimensions": ["landing_page_path"],
+      "base_metric": "cvr",
+      "rank_by": "baseline_cvr",
+      "rank_order": "desc",
+      "filter_mode": "all",
+      "min_sessions_mode": "baseline_only",
+      "output_key": "baseline_top5_pages",
+      "stop_conditions": {
+        "max_depth": 1,
+        "min_baseline_sessions": 50,
+        "top_k": 5
+      },
+      "next": "baseline_bottom5_pages"
+    },
+
+    {
+      "id": "baseline_bottom5_pages",
+      "type": "recursive_dimension_breakdown",
+      "dimensions": ["landing_page_path"],
+      "base_metric": "cvr",
+      "rank_by": "baseline_cvr",
+      "rank_order": "asc",
+      "filter_mode": "all",
+      "min_sessions_mode": "baseline_only",
+      "output_key": "baseline_bottom5_pages",
+      "stop_conditions": {
+        "max_depth": 1,
+        "min_baseline_sessions": 50,
+        "top_k": 5
+      },
+      "next": "final_insight"
+    },
+
+    {
+      "id": "final_insight",
+      "type": "insight",
+      "output_format": "structured_text",
+      "template": {
+        "summary": "Baseline CVR ranking for landing pages (top 5 and bottom 5) with session deltas.",
+        "details": [
+          "Top 5 baseline CVR pages:\n{{baseline_top5_pages}}",
+          "Bottom 5 baseline CVR pages:\n{{baseline_bottom5_pages}}"
+        ],
+        "confidence": "{{confidence_score}}"
+      },
+      "persist": {
+        "table": "alert_rca_results",
+        "fields": ["alert_id", "summary", "confidence"]
+      }
+    }
+  ]
+}

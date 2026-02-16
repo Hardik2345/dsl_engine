@@ -8,6 +8,11 @@ async function RecursiveDimensionBreakdownNode(def, context) {
     base_metric = 'cvr',
     include_orders,
     stop_conditions = {},
+    rank_by = 'delta',
+    rank_order = 'desc',
+    filter_mode = 'drop',
+    min_sessions_mode = 'both_low',
+    output_key,
     next
   } = def;
 
@@ -110,13 +115,23 @@ async function RecursiveDimensionBreakdownNode(def, context) {
         baseline_atc_sessions
       } = row;
 
-      if (
-        current_sessions < min_current_sessions &&
-        baseline_sessions < min_baseline_sessions
-      ) continue;
+      const currentLow = current_sessions < min_current_sessions;
+      const baselineLow = baseline_sessions < min_baseline_sessions;
+      if (min_sessions_mode === 'baseline_only') {
+        if (baselineLow) continue;
+      } else if (min_sessions_mode === 'either_low') {
+        if (currentLow || baselineLow) continue;
+      } else {
+        if (currentLow && baselineLow) continue;
+      }
 
       const current_cvr =
         current_sessions === 0 ? null : current_orders / current_sessions;
+
+      const baseline_cvr_calc =
+        baseline_sessions === 0
+          ? null
+          : baseline_orders / baseline_sessions;
 
       const baseline_cvr =
         baseline_sessions === 0
@@ -153,9 +168,17 @@ async function RecursiveDimensionBreakdownNode(def, context) {
           ? null
           : ((current_atc_sessions - baseline_atc_sessions) / baseline_atc_sessions) * 100;
 
-      // Skip if metric is improving (not dropping)
-      if (isAtcMetric && (atc_rate_delta_pct == null || atc_rate_delta_pct >= 0)) continue;
-      if (!isAtcMetric && (cvr_delta_pct == null || cvr_delta_pct >= 0)) continue;
+      if (filter_mode === 'drop') {
+        if (isAtcMetric && (atc_rate_delta_pct == null || atc_rate_delta_pct >= 0)) continue;
+        if (!isAtcMetric && (cvr_delta_pct == null || cvr_delta_pct >= 0)) continue;
+      }
+
+      if (filter_mode === 'increase') {
+        if (isAtcMetric && (atc_rate_delta_pct == null || atc_rate_delta_pct <= 0)) continue;
+        if (!isAtcMetric && (cvr_delta_pct == null || cvr_delta_pct <= 0)) continue;
+      }
+
+      if (rank_by === 'baseline_cvr' && baseline_cvr_calc == null) continue;
 
       const orders_delta_pct =
         baseline_orders === 0
@@ -200,7 +223,7 @@ async function RecursiveDimensionBreakdownNode(def, context) {
           orders: baseline_orders,
           sessions: baseline_sessions,
           atc_sessions: baseline_atc_sessions,
-          cvr: baseline_cvr,
+          cvr: baseline_cvr_calc ?? baseline_cvr,
           atc_rate: baseline_atc_rate
         },
         deltas: {
@@ -212,6 +235,8 @@ async function RecursiveDimensionBreakdownNode(def, context) {
         },
         sessionShare,
         orderShare,
+        baselineSessionShare: baselineShare,
+        baselineOrderShare,
         base_metric
       });
     }
@@ -222,29 +247,42 @@ async function RecursiveDimensionBreakdownNode(def, context) {
 
     // ---------- Phase 2: rank ----------
     const scoreFor = (entry) => {
+      const baselineSessionShare = entry.baselineSessionShare ?? 0;
+      const baselineOrderShare = entry.baselineOrderShare ?? 0;
+
+      if (rank_by === 'baseline_cvr') {
+        const pct = entry.baseline?.cvr;
+        return pct == null ? -Infinity : Math.abs(pct) * baselineSessionShare;
+      }
+      if (rank_by === 'baseline_sessions') {
+        return baselineSessionShare || 0;
+      }
+      if (rank_by === 'baseline_orders') {
+        return baselineOrderShare || 0;
+      }
+
       const metric = entry.base_metric || base_metric || 'cvr';
       if (metric === 'orders') {
         const pct = entry.deltas.orders_delta_pct;
-        const share = entry.orderShare ?? entry.sessionShare ?? 0;
-        return pct == null ? -Infinity : Math.abs(pct) * share;
+        return pct == null ? -Infinity : Math.abs(pct) * baselineOrderShare;
       }
       if (metric === 'sessions') {
         const pct = entry.deltas.sessions_delta_pct;
-        return pct == null ? -Infinity : Math.abs(pct);
+        return pct == null ? -Infinity : Math.abs(pct) * baselineSessionShare;
       }
       if (metric === 'atc_rate') {
         const pct = entry.deltas.atc_rate_delta_pct;
-        return pct == null ? -Infinity : Math.abs(pct) * entry.sessionShare;
+        return pct == null ? -Infinity : Math.abs(pct) * baselineSessionShare;
       }
       // default cvr
       const pct = entry.deltas.cvr_delta_pct;
-      return pct == null ? -Infinity : Math.abs(pct) * entry.sessionShare;
+      return pct == null ? -Infinity : Math.abs(pct) * baselineSessionShare;
     };
 
     filteredCandidates.sort((a, b) => {
       const aScore = scoreFor(a);
       const bScore = scoreFor(b);
-      return bScore - aScore;
+      return rank_order === 'asc' ? aScore - bScore : bScore - aScore;
     });
 
     const topCandidates = filteredCandidates.slice(0, top_k);
@@ -275,56 +313,75 @@ async function RecursiveDimensionBreakdownNode(def, context) {
   const mergedEvidence = Array.from(mergedEvidenceMap.values());
 
   const scoreForEntry = (entry) => {
+    const baselineSessionShare = entry.baselineSessionShare ?? 0;
+    const baselineOrderShare = entry.baselineOrderShare ?? 0;
+
+    if (rank_by === 'baseline_cvr') {
+      const pct = entry.baseline?.cvr;
+      return pct == null ? -Infinity : Math.abs(pct) * baselineSessionShare;
+    }
+    if (rank_by === 'baseline_sessions') {
+      return baselineSessionShare || 0;
+    }
+    if (rank_by === 'baseline_orders') {
+      return baselineOrderShare || 0;
+    }
+
     const metric = entry.base_metric || base_metric || 'cvr';
     if (metric === 'orders') {
       const pct = entry.deltas?.orders_delta_pct;
-      const share = entry.orderShare ?? entry.sessionShare ?? 0;
-      return pct == null ? -Infinity : Math.abs(pct) * share;
+      return pct == null ? -Infinity : Math.abs(pct) * baselineOrderShare;
     }
     if (metric === 'sessions') {
       const pct = entry.deltas?.sessions_delta_pct;
-      return pct == null ? -Infinity : Math.abs(pct);
+      return pct == null ? -Infinity : Math.abs(pct) * baselineSessionShare;
     }
     if (metric === 'atc_rate') {
       const pct = entry.deltas?.atc_rate_delta_pct;
-      return pct == null ? -Infinity : Math.abs(pct) * (entry.sessionShare ?? 0);
+      return pct == null ? -Infinity : Math.abs(pct) * baselineSessionShare;
     }
     const pct = entry.deltas?.cvr_delta_pct;
-    return pct == null ? -Infinity : Math.abs(pct) * (entry.sessionShare ?? 0);
+    return pct == null ? -Infinity : Math.abs(pct) * baselineSessionShare;
   };
 
   const rankedEvidence = [...mergedEvidence].sort((a, b) => {
     const aScore = scoreForEntry(a);
     const bScore = scoreForEntry(b);
-    return bScore - aScore;
+    return rank_order === 'asc' ? aScore - bScore : bScore - aScore;
   });
   const topEvidence = rankedEvidence[0] || null;
+
+  const outputMetrics = topEvidence
+    ? {
+        top_dimension: topEvidence.dimension,
+        top_value: topEvidence.value,
+        top_display_value: topEvidence.display_value ?? topEvidence.value,
+        top_sessions_delta_pct: topEvidence.deltas?.sessions_delta_pct,
+        top_orders_delta_pct: topEvidence.deltas?.orders_delta_pct,
+        top_cvr_delta_pct: topEvidence.deltas?.cvr_delta_pct,
+        top_atc_rate_delta_pct: topEvidence.deltas?.atc_rate_delta_pct,
+        top_atc_sessions_delta_pct: topEvidence.deltas?.atc_sessions_delta_pct,
+        top_current_sessions: topEvidence.current?.sessions,
+        top_baseline_sessions: topEvidence.baseline?.sessions,
+        top_current_orders: topEvidence.current?.orders,
+        top_baseline_orders: topEvidence.baseline?.orders,
+        top_current_atc_sessions: topEvidence.current?.atc_sessions,
+        top_baseline_atc_sessions: topEvidence.baseline?.atc_sessions,
+        top_current_atc_rate: topEvidence.current?.atc_rate,
+        top_baseline_atc_rate: topEvidence.baseline?.atc_rate
+      }
+    : {};
+
+  if (output_key) {
+    outputMetrics[output_key] = formatBaselineList(rankedEvidence);
+  }
 
   return {
     status: 'pass',
     delta: {
-      metrics: topEvidence
-        ? {
-            top_dimension: topEvidence.dimension,
-            top_value: topEvidence.value,
-            top_display_value: topEvidence.display_value ?? topEvidence.value,
-            top_sessions_delta_pct: topEvidence.deltas?.sessions_delta_pct,
-            top_orders_delta_pct: topEvidence.deltas?.orders_delta_pct,
-            top_cvr_delta_pct: topEvidence.deltas?.cvr_delta_pct,
-            top_atc_rate_delta_pct: topEvidence.deltas?.atc_rate_delta_pct,
-            top_atc_sessions_delta_pct: topEvidence.deltas?.atc_sessions_delta_pct,
-            top_current_sessions: topEvidence.current?.sessions,
-            top_baseline_sessions: topEvidence.baseline?.sessions,
-            top_current_orders: topEvidence.current?.orders,
-            top_baseline_orders: topEvidence.baseline?.orders,
-            top_current_atc_sessions: topEvidence.current?.atc_sessions,
-            top_baseline_atc_sessions: topEvidence.baseline?.atc_sessions,
-            top_current_atc_rate: topEvidence.current?.atc_rate,
-            top_baseline_atc_rate: topEvidence.baseline?.atc_rate
-          }
-        : {},
+      metrics: outputMetrics,
       breakdowns: {
-        [dimensionList[0]]: rankedEvidence
+        [output_key || dimensionList[0]]: rankedEvidence
       }
     },
     next
@@ -332,3 +389,24 @@ async function RecursiveDimensionBreakdownNode(def, context) {
 }
 
 module.exports = RecursiveDimensionBreakdownNode;
+
+function formatBaselineList(entries) {
+  if (!Array.isArray(entries) || entries.length === 0) return 'none';
+
+  return entries.map((entry, idx) => {
+    const label = entry.display_value ?? entry.value;
+    const baselineCvr = formatPct((entry.baseline?.cvr || 0) * 100);
+    const baselineSessions = entry.baseline?.sessions ?? 0;
+    const currentSessions = entry.current?.sessions ?? 0;
+    const sessionsDelta = formatPct(entry.deltas?.sessions_delta_pct);
+
+    return `${idx + 1}. ${label} | baseline CVR ${baselineCvr} | sessions ${baselineSessions} -> ${currentSessions} (${sessionsDelta})`;
+  }).join('\n');
+}
+
+function formatPct(value) {
+  if (value === undefined || value === null || Number.isNaN(Number(value))) {
+    return 'unknown';
+  }
+  return `${Number(value).toFixed(2)}%`;
+}

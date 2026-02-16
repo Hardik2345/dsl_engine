@@ -243,11 +243,48 @@ export default function RunDetailPage() {
                 
                 {run.context.scratch.finalInsight.details && run.context.scratch.finalInsight.details.length > 0 && (
                    <ul className="list-disc list-inside space-y-1 mb-3">
-                      {run.context.scratch.finalInsight.details.map((detail, idx) => (
+                      {run.context.scratch.finalInsight.details.map((detail, idx) => {
+                        if (typeof detail !== 'string') {
+                          return (
+                            <li key={idx} className="text-xs text-primary-800">
+                              {String(detail)}
+                            </li>
+                          );
+                        }
+
+                        const lines = detail.split('\n').filter(Boolean);
+                        if (lines.length <= 1) {
+                          return (
+                            <li key={idx} className="text-xs text-primary-800">
+                              {detail}
+                            </li>
+                          );
+                        }
+
+                        const [header, ...items] = lines;
+                        const listItems = items.filter((line) => /^\d+\.\s+/.test(line));
+                        const fallbackItems = items.filter((line) => !/^\d+\.\s+/.test(line));
+
+                        return (
                           <li key={idx} className="text-xs text-primary-800">
-                             {detail}
+                            <span>{header}</span>
+                            {listItems.length > 0 && (
+                              <ol className="list-decimal list-inside mt-1 space-y-0.5 ml-4">
+                                {listItems.map((line, lineIdx) => (
+                                  <li key={lineIdx}>{line.replace(/^\d+\.\s+/, '')}</li>
+                                ))}
+                              </ol>
+                            )}
+                            {fallbackItems.length > 0 && (
+                              <div className="mt-1 space-y-0.5">
+                                {fallbackItems.map((line, lineIdx) => (
+                                  <div key={lineIdx}>{line}</div>
+                                ))}
+                              </div>
+                            )}
                           </li>
-                      ))}
+                        );
+                      })}
                    </ul>
                 )}
 
