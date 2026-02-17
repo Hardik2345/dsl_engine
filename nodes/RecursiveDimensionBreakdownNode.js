@@ -373,7 +373,10 @@ async function RecursiveDimensionBreakdownNode(def, context) {
     : {};
 
   if (output_key) {
-    outputMetrics[output_key] = formatBaselineList(rankedEvidence);
+    outputMetrics[output_key] = formatBaselineList(rankedEvidence, {
+      rankBy: rank_by,
+      baseMetric: base_metric
+    });
   }
 
   return {
@@ -390,17 +393,36 @@ async function RecursiveDimensionBreakdownNode(def, context) {
 
 module.exports = RecursiveDimensionBreakdownNode;
 
-function formatBaselineList(entries) {
+function formatBaselineList(entries, options = {}) {
   if (!Array.isArray(entries) || entries.length === 0) return 'none';
+
+  const { rankBy = 'delta', baseMetric = 'cvr' } = options;
 
   return entries.map((entry, idx) => {
     const label = entry.display_value ?? entry.value;
     const baselineCvr = formatPct((entry.baseline?.cvr || 0) * 100);
     const baselineSessions = entry.baseline?.sessions ?? 0;
     const currentSessions = entry.current?.sessions ?? 0;
+    const baselineOrders = entry.baseline?.orders ?? 0;
+    const currentOrders = entry.current?.orders ?? 0;
     const sessionsDelta = formatPct(entry.deltas?.sessions_delta_pct);
+    const ordersDelta = formatPct(entry.deltas?.orders_delta_pct);
 
-    return `${idx + 1}. ${label} | baseline CVR ${baselineCvr} | sessions ${baselineSessions} -> ${currentSessions} (${sessionsDelta})`;
+    const showSessionsOnly = rankBy === 'baseline_sessions' || baseMetric === 'sessions';
+    const showOrdersOnly = rankBy === 'baseline_orders' || baseMetric === 'orders';
+
+    const parts = [`${idx + 1}. ${label}`, `baseline CVR ${baselineCvr}`];
+
+    if (showOrdersOnly) {
+      parts.push(`orders ${baselineOrders} -> ${currentOrders} (${ordersDelta})`);
+    } else if (showSessionsOnly) {
+      parts.push(`sessions ${baselineSessions} -> ${currentSessions} (${sessionsDelta})`);
+    } else {
+      parts.push(`sessions ${baselineSessions} -> ${currentSessions} (${sessionsDelta})`);
+      parts.push(`orders ${baselineOrders} -> ${currentOrders} (${ordersDelta})`);
+    }
+
+    return parts.join(' | ');
   }).join('\n');
 }
 
