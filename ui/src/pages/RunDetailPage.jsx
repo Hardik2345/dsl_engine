@@ -269,10 +269,24 @@ export default function RunDetailPage() {
                           <li key={idx} className="text-xs text-primary-800">
                             <span>{header}</span>
                             {listItems.length > 0 && (
-                              <ol className="list-decimal list-inside mt-1 space-y-0.5 ml-4">
-                                {listItems.map((line, lineIdx) => (
-                                  <li key={lineIdx}>{line.replace(/^\d+\.\s+/, '')}</li>
-                                ))}
+                              <ol className="list-decimal list-inside mt-1 space-y-1 ml-4">
+                                {listItems.map((line, lineIdx) => {
+                                  const content = line.replace(/^\d+\.\s+/, '');
+                                  const parts = content.split(' | ').map((part) => part.trim()).filter(Boolean);
+                                  const [title, ...rest] = parts;
+                                  return (
+                                    <li key={lineIdx}>
+                                      <span>{title}</span>
+                                      {rest.length > 0 && (
+                                        <ul className="list-disc list-inside ml-4 mt-0.5 space-y-0.5">
+                                          {rest.map((item, itemIdx) => (
+                                            <li key={itemIdx}>{item}</li>
+                                          ))}
+                                        </ul>
+                                      )}
+                                    </li>
+                                  );
+                                })}
                               </ol>
                             )}
                             {fallbackItems.length > 0 && (
