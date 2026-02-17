@@ -49,6 +49,38 @@ export default function RunDetailPage() {
     if (diffMs < 60000) return `${(diffMs / 1000).toFixed(2)}s`;
     return `${(diffMs / 60000).toFixed(2)}m`;
   };
+  const truncate = (text, max = 200) => {
+    if (!text || typeof text !== 'string') return '';
+    if (text.length <= max) return text;
+    return `${text.slice(0, max - 1)}…`;
+  };
+  const renderRankedList = (text) => {
+    if (!text || typeof text !== 'string') return null;
+    const lines = text.split('\n').filter(Boolean);
+    if (!lines.length || !lines.every((line) => /^\d+\.\s+/.test(line))) return null;
+
+    return (
+      <ol className="list-decimal list-inside space-y-1">
+        {lines.map((line, idx) => {
+          const content = line.replace(/^\d+\.\s+/, '');
+          const parts = content.split(' | ').map((part) => part.trim()).filter(Boolean);
+          const [title, ...rest] = parts;
+          return (
+            <li key={idx}>
+              <span>{truncate(title, 140)}</span>
+              {rest.length > 0 && (
+                <ul className="list-disc list-inside ml-4 mt-0.5 space-y-0.5">
+                  {rest.map((item, itemIdx) => (
+                    <li key={itemIdx}>{truncate(item, 160)}</li>
+                  ))}
+                </ul>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+    );
+  };
 
   return (
     <div>
@@ -195,10 +227,12 @@ export default function RunDetailPage() {
               <CardContent>
                 <dl className="space-y-2">
                   {Object.entries(run.metrics).map(([key, value]) => (
-                    <div key={key} className="flex justify-between">
+                    <div key={key} className="flex justify-between gap-4">
                       <dt className="text-sm text-gray-500">{key}</dt>
-                      <dd className="font-medium text-sm">
-                        {typeof value === 'number' ? value.toFixed(2) : String(value)}
+                      <dd className="font-medium text-sm text-right break-words">
+                        {typeof value === 'number'
+                          ? value.toFixed(2)
+                          : renderRankedList(value) || truncate(String(value), 200)}
                       </dd>
                     </div>
                   ))}
@@ -238,7 +272,7 @@ export default function RunDetailPage() {
               </CardHeader>
               <CardContent>
                 <div className="text-sm text-primary-900 font-medium mb-3">
-                  {run.context.scratch.finalInsight.summary}
+                  {truncate(run.context.scratch.finalInsight.summary, 220)}
                 </div>
                 
                 {run.context.scratch.finalInsight.details && run.context.scratch.finalInsight.details.length > 0 && (
@@ -256,7 +290,7 @@ export default function RunDetailPage() {
                         if (lines.length <= 1) {
                           return (
                             <li key={idx} className="text-xs text-primary-800">
-                              {detail}
+                              {truncate(detail, 260)}
                             </li>
                           );
                         }
@@ -267,7 +301,7 @@ export default function RunDetailPage() {
 
                         return (
                           <li key={idx} className="text-xs text-primary-800">
-                            <span>{header}</span>
+                            <span>{truncate(header, 200)}</span>
                             {listItems.length > 0 && (
                               <ol className="list-decimal list-inside mt-1 space-y-1 ml-4">
                                 {listItems.map((line, lineIdx) => {
@@ -276,11 +310,11 @@ export default function RunDetailPage() {
                                   const [title, ...rest] = parts;
                                   return (
                                     <li key={lineIdx}>
-                                      <span>{title}</span>
+                                      <span>{truncate(title, 140)}</span>
                                       {rest.length > 0 && (
                                         <ul className="list-disc list-inside ml-4 mt-0.5 space-y-0.5">
                                           {rest.map((item, itemIdx) => (
-                                            <li key={itemIdx}>{item}</li>
+                                            <li key={itemIdx}>{truncate(item, 160)}</li>
                                           ))}
                                         </ul>
                                       )}
