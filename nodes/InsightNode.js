@@ -44,15 +44,25 @@ function InsightNode(def, context) {
     .filter(entry => entry.dimension === 'product_id');
 
   const selected = [];
+  const selectedKeys = new Set();
+
+  const addIfUnique = (entry) => {
+    if (!entry) return false;
+    const key = makeEvidenceKey(entry);
+    if (selectedKeys.has(key)) return false;
+    selected.push(entry);
+    selectedKeys.add(key);
+    return true;
+  };
+
   if (productCandidates.length) {
-    selected.push(productCandidates[0]);
+    addIfUnique(productCandidates[0]);
   }
 
   const pool = scored.map(item => item.entry);
   for (const entry of pool) {
     if (selected.length >= 4) break;
-    if (selected.includes(entry)) continue;
-    selected.push(entry);
+    addIfUnique(entry);
   }
 
   const matchedBreakdown = context?.scratch?.matched_breakdown || null;
@@ -196,4 +206,11 @@ function formatDimensionLabel(dimension) {
   if (!dimension) return undefined;
   if (dimension === 'product_id') return 'Product';
   return dimension;
+}
+
+function makeEvidenceKey(entry) {
+  if (!entry) return 'unknown';
+  const dimension = entry.dimension || 'unknown_dimension';
+  const value = entry.value ?? entry.display_value ?? 'unknown_value';
+  return `${dimension}::${String(value)}`;
 }
