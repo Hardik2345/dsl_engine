@@ -173,7 +173,11 @@ function renderTemplate(str, ctx) {
 
   return str.replace(/\{\{(\w+)\}\}/g, (_, key) => {
     const val = ctx[key];
-    return val === undefined || val === null ? 'unknown' : String(val);
+    if (val === undefined || val === null) return 'unknown';
+    if (typeof val === 'number' && Number.isFinite(val)) {
+      return val.toFixed(2);
+    }
+    return String(val);
   });
 }
 
