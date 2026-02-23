@@ -8,10 +8,12 @@
   "main": "server.js",
   "scripts": {
     "start": "nodemon server.js",
+    "start:worker": "nodemon scheduler/worker.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
     "@xyflow/react": "^12.10.0",
+    "amqplib": "^0.10.9",
     "cors": "^2.8.5",
     "dagre": "^0.8.5",
     "dotenv": "^16.4.5",

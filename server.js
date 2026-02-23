@@ -8,6 +8,9 @@ const globalWorkflowRoutes = require('./server/routes/globalWorkflows');
 const runRoutes = require('./server/routes/runs');
 const insightRoutes = require('./server/routes/insights');
 const tenantRoutes = require('./server/routes/tenants');
+const scheduleRoutes = require('./server/routes/schedules');
+const triggerRoutes = require('./server/routes/triggers');
+const schedulerRoutes = require('./server/routes/scheduler');
 
 const app = express();
 
@@ -36,7 +39,10 @@ app.use('/tenants', tenantRoutes);
 app.use('/workflows/global', globalWorkflowRoutes);
 app.use('/tenants/:tenantId/workflows', workflowRoutes);
 app.use('/tenants/:tenantId/workflows', runRoutes);
+app.use('/tenants/:tenantId/workflows', scheduleRoutes);
 app.use('/tenants/:tenantId/insights', insightRoutes);
+app.use('/tenants/:tenantId/triggers', triggerRoutes);
+app.use('/tenants/:tenantId/scheduler', schedulerRoutes);
 
 app.use((err, req, res, next) => {
   const status = err.status || 500;

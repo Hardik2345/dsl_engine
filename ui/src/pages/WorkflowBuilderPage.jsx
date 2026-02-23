@@ -14,6 +14,7 @@ const NEW_WORKFLOW_TEMPLATE = {
   version: '1.0',
   trigger: {
     type: 'alert',
+    alertType: 'cvr_drop',
     metric: 'cvr',
     condition: {
       operator: '<',

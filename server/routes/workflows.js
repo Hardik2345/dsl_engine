@@ -11,6 +11,34 @@ function generateWorkflowId() {
 
 const router = express.Router({ mergeParams: true });
 
+function normalizeTriggerDefinition(definition, tenantId, scope = 'tenant') {
+  const next = { ...definition };
+  const trigger = { ...(definition.trigger || {}) };
+
+  if (!trigger.alertType) {
+    trigger.alertType = trigger.metric || 'default_alert';
+  }
+
+  if (!trigger.brandScope) {
+    trigger.brandScope = scope === 'global' ? 'global' : 'single';
+  }
+
+  if (trigger.brandScope === 'single' || trigger.brandScope === 'multiple') {
+    if (!Array.isArray(trigger.brandIds) || trigger.brandIds.length === 0) {
+      trigger.brandIds = tenantId ? [tenantId] : [];
+    }
+  } else {
+    trigger.brandIds = [];
+  }
+
+  if (!trigger.type) {
+    trigger.type = 'alert';
+  }
+
+  next.trigger = trigger;
+  return next;
+}
+
 // Middleware to validate tenant exists
 async function validateTenant(req, res, next) {
   try {
@@ -53,7 +81,7 @@ router.get('/', async (req, res, next) => {
 router.post('/', async (req, res, next) => {
   try {
     const { tenantId } = req.params;
-    const definition = req.body;
+    const definition = normalizeTriggerDefinition(req.body, tenantId, 'tenant');
     
     // Auto-generate workflow_id if not provided
     if (!definition.workflow_id) {
@@ -123,7 +151,7 @@ router.get('/:workflowId', async (req, res, next) => {
 router.post('/:workflowId/versions', async (req, res, next) => {
   try {
     const { tenantId, workflowId } = req.params;
-    const definition = req.body;
+    const definition = normalizeTriggerDefinition(req.body, tenantId, 'tenant');
     const { ok, errors } = validateWorkflowDefinition(definition);
     if (!ok) {
       return res.status(400).json({ errors });

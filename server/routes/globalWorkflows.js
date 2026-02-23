@@ -10,6 +10,27 @@ function generateWorkflowId() {
 
 const router = express.Router();
 
+function normalizeTriggerDefinition(definition) {
+  const next = { ...definition };
+  const trigger = { ...(definition.trigger || {}) };
+
+  if (!trigger.alertType) {
+    trigger.alertType = trigger.metric || 'default_alert';
+  }
+  if (!trigger.brandScope) {
+    trigger.brandScope = 'global';
+  }
+  if (trigger.brandScope === 'global') {
+    trigger.brandIds = [];
+  }
+  if (!trigger.type) {
+    trigger.type = 'alert';
+  }
+
+  next.trigger = trigger;
+  return next;
+}
+
 router.get('/', async (req, res, next) => {
   try {
     const workflows = await Workflow.find({ scope: 'global', tenantId: null }).lean();
@@ -21,7 +42,7 @@ router.get('/', async (req, res, next) => {
 
 router.post('/', async (req, res, next) => {
   try {
-    const definition = req.body;
+    const definition = normalizeTriggerDefinition(req.body);
 
     if (!definition.workflow_id) {
       definition.workflow_id = generateWorkflowId();
@@ -80,7 +101,7 @@ router.get('/:workflowId', async (req, res, next) => {
 router.post('/:workflowId/versions', async (req, res, next) => {
   try {
     const { workflowId } = req.params;
-    const definition = req.body;
+    const definition = normalizeTriggerDefinition(req.body);
     const { ok, errors } = validateWorkflowDefinition(definition);
     if (!ok) {
       return res.status(400).json({ errors });

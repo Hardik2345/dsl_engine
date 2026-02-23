@@ -1,11 +1,8 @@
 const express = require('express');
-const Workflow = require('../models/Workflow');
-const WorkflowVersion = require('../models/WorkflowVersion');
 const WorkflowRun = require('../models/WorkflowRun');
-const Insight = require('../models/Insight');
 const { validateRunContext } = require('../validation/runContext');
-const { pruneWorkflowRuns } = require('../lib/retention');
-const WorkflowRunner = require('../../engine/WorkflowRunner');
+const { resolveWorkflowVersion, executeRun } = require('../services/workflowExecutionService');
+const { enqueueRun } = require('../../scheduler/app/runQueueService');
 
 const router = express.Router({ mergeParams: true });
 
@@ -13,6 +10,7 @@ router.post('/:workflowId/runs', async (req, res, next) => {
   try {
     const { tenantId, workflowId } = req.params;
     const { version, context } = req.body || {};
+    const mode = req.query.mode === 'async' ? 'async' : 'sync';
 
     const { ok, errors } = validateRunContext(context);
     if (!ok) return res.status(400).json({ errors });
@@ -20,66 +18,58 @@ router.post('/:workflowId/runs', async (req, res, next) => {
       return res.status(400).json({ error: 'tenantId mismatch in context' });
     }
 
-    let workflow = await Workflow.findOne({ tenantId, workflowId }).lean();
-    if (!workflow) {
-      workflow = await Workflow.findOne({ scope: 'global', tenantId: null, workflowId }).lean();
-    }
-    if (!workflow) return res.status(404).json({ error: 'workflow not found' });
-
-    const versionId = version || workflow.latestVersion;
-    const scope = workflow.scope || 'tenant';
-    const scopeClause = scope === 'global'
-      ? { scope: 'global' }
-      : { $or: [{ scope: 'tenant' }, { scope: { $exists: false } }] };
-
-    const workflowVersion = await WorkflowVersion.findOne({
-      tenantId: workflow.tenantId ?? null,
+    const { workflowVersion, versionId } = await resolveWorkflowVersion({
+      tenantId,
       workflowId,
-      version: versionId,
-      ...scopeClause
-    }).lean();
-    if (!workflowVersion) {
-      return res.status(404).json({ error: 'workflow version not found' });
-    }
-
-    const nodeOutputs = [];
-    const runner = new WorkflowRunner(workflowVersion.definitionJson, {
-      onNodeResult: payload => nodeOutputs.push(payload)
+      version
     });
 
-    const startedAt = new Date();
-    const result = await runner.executeWorkflow(context);
-    const finishedAt = new Date();
+    if (mode === 'async') {
+      const queued = await enqueueRun({
+        tenantId,
+        workflowId,
+        version: versionId,
+        context,
+        definitionJson: workflowVersion.definitionJson,
+        triggerType: 'manual',
+        triggerRef: null,
+        overlapPolicy: 'queue_one_pending',
+        maxAttempts: 3
+      });
+
+      if (!queued.enqueued) {
+        return res.status(202).json({
+          runId: null,
+          status: 'skipped',
+          reason: queued.reason
+        });
+      }
+
+      return res.status(202).json({
+        runId: queued.run._id,
+        status: queued.run.status
+      });
+    }
 
     const run = await WorkflowRun.create({
       tenantId,
       workflowId,
       version: versionId,
-      status: result.status,
-      context: result.context,
-      metrics: result.context?.metrics,
-      executionTrace: result.context?.executionTrace || [],
-      nodeOutputs,
-      startedAt,
-      finishedAt
+      status: 'running',
+      triggerType: 'manual',
+      triggerRef: null,
+      executionKey: `${tenantId}:${workflowId}`,
+      context,
+      definitionJson: workflowVersion.definitionJson,
+      metrics: {},
+      executionTrace: [],
+      nodeOutputs: [],
+      attempt: 0,
+      maxAttempts: 1,
+      startedAt: new Date()
     });
 
-    const finalInsight = result.context?.scratch?.finalInsight;
-    if (finalInsight) {
-      await Insight.create({
-        tenantId,
-        workflowId,
-        runId: run._id,
-        summary: finalInsight.summary || 'unknown',
-        details: finalInsight.details || [],
-        confidence: finalInsight.confidence
-      });
-    }
-
-    const removedRunIds = await pruneWorkflowRuns(WorkflowRun, tenantId, workflowId, 4);
-    if (removedRunIds.length) {
-      await Insight.deleteMany({ runId: { $in: removedRunIds } });
-    }
+    await executeRun({ run });
 
     res.status(201).json({ runId: run._id, status: run.status });
   } catch (err) {

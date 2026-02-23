@@ -1,5 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { tenantApi, workflowApi, runApi, insightApi } from './endpoints';
+import {
+  tenantApi,
+  workflowApi,
+  runApi,
+  insightApi,
+  scheduleApi,
+  schedulerApi,
+  triggerApi
+} from './endpoints';
 import { useTenant } from '../context/TenantContext';
 
 // ============ Tenant Hooks ============
@@ -182,10 +190,114 @@ export function useExecuteWorkflow(workflowId) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (payload) => runApi.execute(tenantId, workflowId, payload),
+    mutationFn: (input = {}) => {
+      if (input && input.payload !== undefined) {
+        return runApi.execute(tenantId, workflowId, input.payload, { mode: input.mode });
+      }
+      return runApi.execute(tenantId, workflowId, input, {});
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['runs', tenantId, workflowId] });
     },
+  });
+}
+
+// ============ Scheduler Hooks ============
+
+export function useWorkflowSchedules(workflowId) {
+  const { tenantId } = useTenant();
+  return useQuery({
+    queryKey: ['schedules', tenantId, workflowId],
+    queryFn: () => scheduleApi.list(tenantId, workflowId),
+    enabled: !!workflowId
+  });
+}
+
+export function useCreateWorkflowSchedule(workflowId) {
+  const { tenantId } = useTenant();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (payload) => scheduleApi.create(tenantId, workflowId, payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['schedules', tenantId, workflowId] });
+      queryClient.invalidateQueries({ queryKey: ['schedulerQueue', tenantId] });
+    }
+  });
+}
+
+export function useUpdateWorkflowSchedule(workflowId) {
+  const { tenantId } = useTenant();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ scheduleId, payload }) =>
+      scheduleApi.update(tenantId, workflowId, scheduleId, payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['schedules', tenantId, workflowId] });
+    }
+  });
+}
+
+export function usePauseWorkflowSchedule(workflowId) {
+  const { tenantId } = useTenant();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (scheduleId) => scheduleApi.pause(tenantId, workflowId, scheduleId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['schedules', tenantId, workflowId] });
+    }
+  });
+}
+
+export function useResumeWorkflowSchedule(workflowId) {
+  const { tenantId } = useTenant();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (scheduleId) => scheduleApi.resume(tenantId, workflowId, scheduleId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['schedules', tenantId, workflowId] });
+    }
+  });
+}
+
+export function useReplayMissedTriggers(workflowId) {
+  const { tenantId } = useTenant();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (scheduleId) => scheduleApi.replayMissed(tenantId, workflowId, scheduleId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['schedules', tenantId, workflowId] });
+      queryClient.invalidateQueries({ queryKey: ['runs', tenantId, workflowId] });
+      queryClient.invalidateQueries({ queryKey: ['schedulerQueue', tenantId] });
+    }
+  });
+}
+
+export function useSchedulerQueue() {
+  const { tenantId } = useTenant();
+  return useQuery({
+    queryKey: ['schedulerQueue', tenantId],
+    queryFn: () => schedulerApi.queue(tenantId)
+  });
+}
+
+export function useTriggerEvents() {
+  const { tenantId } = useTenant();
+  return useQuery({
+    queryKey: ['triggerEvents', tenantId],
+    queryFn: () => triggerApi.listEvents(tenantId)
+  });
+}
+
+export function useUnmatchedAlerts() {
+  const { tenantId } = useTenant();
+  return useQuery({
+    queryKey: ['unmatchedAlerts', tenantId],
+    queryFn: () => triggerApi.listUnmatched(tenantId)
   });
 }
 

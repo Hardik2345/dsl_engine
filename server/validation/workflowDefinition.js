@@ -29,7 +29,7 @@ function validateWorkflowDefinition(definition) {
   }
 
   // workflow_id is optional (auto-generated if not provided)
-  ['workflow_type', 'version', 'nodes'].forEach(field => {
+  ['workflow_type', 'version', 'nodes', 'trigger'].forEach(field => {
     if (!definition[field]) {
       errors.push(`missing ${field}`);
     }
@@ -42,6 +42,28 @@ function validateWorkflowDefinition(definition) {
   if (!Array.isArray(definition.nodes) || definition.nodes.length === 0) {
     errors.push('nodes must be a non-empty array');
     return { ok: false, errors };
+  }
+
+  if (!definition.trigger || typeof definition.trigger !== 'object') {
+    errors.push('trigger must be an object');
+  } else {
+    const { alertType, brandScope, brandIds, type } = definition.trigger;
+    if (type && type !== 'alert') {
+      errors.push('trigger.type must be alert');
+    }
+    if (!alertType || typeof alertType !== 'string') {
+      errors.push('trigger.alertType is required');
+    }
+    if (!brandScope || !['single', 'multiple', 'global'].includes(brandScope)) {
+      errors.push('trigger.brandScope must be one of single|multiple|global');
+    }
+    if ((brandScope === 'single' || brandScope === 'multiple')
+      && (!Array.isArray(brandIds) || brandIds.length === 0)) {
+      errors.push('trigger.brandIds is required for single/multiple brandScope');
+    }
+    if (brandScope === 'global' && Array.isArray(brandIds) && brandIds.length) {
+      errors.push('trigger.brandIds must be empty for global brandScope');
+    }
   }
 
   const nodeIds = new Set();

@@ -134,9 +134,95 @@ export const runApi = {
   },
 
   // Execute a workflow run
-  execute: async (tenantId, workflowId, payload) => {
+  execute: async (tenantId, workflowId, payload, { mode } = {}) => {
     const { data } = await api.post(
       `/tenants/${tenantId}/workflows/${workflowId}/runs`,
+      payload,
+      {
+        params: mode ? { mode } : {}
+      }
+    );
+    return data;
+  },
+};
+
+export const scheduleApi = {
+  list: async (tenantId, workflowId) => {
+    const { data } = await api.get(
+      `/tenants/${tenantId}/workflows/${workflowId}/schedules`
+    );
+    return data.schedules;
+  },
+
+  create: async (tenantId, workflowId, payload) => {
+    const { data } = await api.post(
+      `/tenants/${tenantId}/workflows/${workflowId}/schedules`,
+      payload
+    );
+    return data.schedule;
+  },
+
+  update: async (tenantId, workflowId, scheduleId, payload) => {
+    const { data } = await api.patch(
+      `/tenants/${tenantId}/workflows/${workflowId}/schedules/${scheduleId}`,
+      payload
+    );
+    return data.schedule;
+  },
+
+  pause: async (tenantId, workflowId, scheduleId) => {
+    const { data } = await api.post(
+      `/tenants/${tenantId}/workflows/${workflowId}/schedules/${scheduleId}/pause`
+    );
+    return data.schedule;
+  },
+
+  resume: async (tenantId, workflowId, scheduleId) => {
+    const { data } = await api.post(
+      `/tenants/${tenantId}/workflows/${workflowId}/schedules/${scheduleId}/resume`
+    );
+    return data.schedule;
+  },
+
+  replayMissed: async (tenantId, workflowId, scheduleId) => {
+    const { data } = await api.post(
+      `/tenants/${tenantId}/workflows/${workflowId}/schedules/${scheduleId}/replay-missed`
+    );
+    return data;
+  },
+};
+
+export const schedulerApi = {
+  queue: async (tenantId) => {
+    const { data } = await api.get(`/tenants/${tenantId}/scheduler/queue`);
+    return data.queue;
+  },
+
+  retryRun: async (tenantId, runId) => {
+    const { data } = await api.post(`/tenants/${tenantId}/scheduler/runs/${runId}/retry`);
+    return data;
+  },
+
+  cancelRun: async (tenantId, runId) => {
+    const { data } = await api.post(`/tenants/${tenantId}/scheduler/runs/${runId}/cancel`);
+    return data;
+  },
+};
+
+export const triggerApi = {
+  listEvents: async (tenantId) => {
+    const { data } = await api.get(`/tenants/${tenantId}/triggers/events`);
+    return data.events;
+  },
+
+  listUnmatched: async (tenantId) => {
+    const { data } = await api.get(`/tenants/${tenantId}/triggers/unmatched`);
+    return data.alerts;
+  },
+
+  ingestEvent: async (tenantId, payload) => {
+    const { data } = await api.post(
+      `/tenants/${tenantId}/triggers/events`,
       payload
     );
     return data;

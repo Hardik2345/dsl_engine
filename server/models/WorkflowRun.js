@@ -6,10 +6,25 @@ const WorkflowRunSchema = new mongoose.Schema(
     workflowId: { type: String, required: true },
     version: { type: String, required: true },
     status: { type: String, required: true },
+    triggerType: {
+      type: String,
+      enum: ['manual', 'event', 'cron'],
+      default: 'manual'
+    },
+    triggerRef: { type: mongoose.Schema.Types.Mixed, default: null },
+    executionKey: { type: String, index: true },
     context: { type: Object, required: true },
+    definitionJson: { type: Object, required: true },
     metrics: { type: Object },
     executionTrace: { type: Array },
     nodeOutputs: { type: Array },
+    attempt: { type: Number, default: 0 },
+    maxAttempts: { type: Number, default: 3 },
+    nextRetryAt: { type: Date, default: null },
+    queuedAt: { type: Date },
+    leaseOwner: { type: String, default: null },
+    leaseExpiresAt: { type: Date, default: null },
+    lastError: { type: String, default: null },
     startedAt: { type: Date, required: true },
     finishedAt: { type: Date }
   },
@@ -17,5 +32,7 @@ const WorkflowRunSchema = new mongoose.Schema(
 );
 
 WorkflowRunSchema.index({ tenantId: 1, workflowId: 1, startedAt: -1 });
+WorkflowRunSchema.index({ status: 1, queuedAt: 1 });
+WorkflowRunSchema.index({ executionKey: 1, status: 1 });
 
 module.exports = mongoose.model('WorkflowRun', WorkflowRunSchema);
