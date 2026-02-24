@@ -81,6 +81,40 @@ export default function RunDetailPage() {
       </ol>
     );
   };
+  const formatMetaValue = (key, value) => {
+    if (value == null) return '';
+
+    if (key === 'window' || key === 'baselineWindow') {
+      let rangeValue = value;
+      if (typeof value === 'string') {
+        try {
+          rangeValue = JSON.parse(value);
+        } catch {
+          rangeValue = value;
+        }
+      }
+
+      if (rangeValue && typeof rangeValue === 'object') {
+        const start = rangeValue.start ? new Date(rangeValue.start) : null;
+        const end = rangeValue.end ? new Date(rangeValue.end) : null;
+
+        const isValidStart = start && !Number.isNaN(start.getTime());
+        const isValidEnd = end && !Number.isNaN(end.getTime());
+
+        if (isValidStart && isValidEnd) {
+          const range = `${format(start, 'MMM d, yyyy HH:mm')} → ${format(end, 'MMM d, yyyy HH:mm')}`;
+          const suffix = rangeValue.type ? ` (${rangeValue.type})` : '';
+          return `${range}${suffix}`;
+        }
+      }
+    }
+
+    if (typeof value === 'object') {
+      return JSON.stringify(value);
+    }
+
+    return String(value);
+  };
 
   const finalInsight = run?.context?.scratch?.finalInsight
     || run?.nodeOutputs
@@ -260,9 +294,7 @@ export default function RunDetailPage() {
                     <div key={key}>
                       <dt className="text-gray-500">{key}</dt>
                       <dd className="font-medium break-all">
-                        {typeof value === 'object'
-                          ? JSON.stringify(value)
-                          : String(value)}
+                        {formatMetaValue(key, value)}
                       </dd>
                     </div>
                   ))}
