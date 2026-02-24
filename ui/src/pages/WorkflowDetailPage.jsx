@@ -22,6 +22,7 @@ import {
   useCreateWorkflowSchedule,
   usePauseWorkflowSchedule,
   useResumeWorkflowSchedule,
+  useDeleteWorkflowSchedule,
   useReplayMissedTriggers,
   useSchedulerQueue,
   useTriggerEvents,
@@ -67,6 +68,7 @@ export default function WorkflowDetailPage() {
   const createSchedule = useCreateWorkflowSchedule(workflowId);
   const pauseSchedule = usePauseWorkflowSchedule(workflowId);
   const resumeSchedule = useResumeWorkflowSchedule(workflowId);
+  const deleteSchedule = useDeleteWorkflowSchedule(workflowId);
   const replayMissed = useReplayMissedTriggers(workflowId);
 
   const [runModalOpen, setRunModalOpen] = useState(false);
@@ -154,6 +156,20 @@ export default function WorkflowDetailPage() {
       toast.success(`Replayed ${result.replayedCount || 0} missed triggers`);
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed to replay missed triggers');
+    }
+  };
+
+  const handleDeleteSchedule = async (scheduleId, scheduleName) => {
+    const label = scheduleName || 'this schedule';
+    if (!confirm(`Delete ${label}? This removes the schedule and its missed-trigger records.`)) {
+      return;
+    }
+
+    try {
+      await deleteSchedule.mutateAsync(scheduleId);
+      toast.success('Schedule deleted');
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to delete schedule');
     }
   };
 
@@ -400,6 +416,15 @@ export default function WorkflowDetailPage() {
                         >
                           <RefreshCw className="w-3 h-3 mr-1" />
                           Replay Missed
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="danger"
+                          onClick={() => handleDeleteSchedule(schedule._id, schedule.name)}
+                          loading={deleteSchedule.isPending}
+                        >
+                          <Trash2 className="w-3 h-3 mr-1" />
+                          Delete
                         </Button>
                       </div>
                     </div>

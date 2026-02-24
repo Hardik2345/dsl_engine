@@ -263,6 +263,19 @@ export function useResumeWorkflowSchedule(workflowId) {
   });
 }
 
+export function useDeleteWorkflowSchedule(workflowId) {
+  const { tenantId } = useTenant();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (scheduleId) => scheduleApi.remove(tenantId, workflowId, scheduleId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['schedules', tenantId, workflowId] });
+      queryClient.invalidateQueries({ queryKey: ['schedulerQueue', tenantId] });
+    }
+  });
+}
+
 export function useReplayMissedTriggers(workflowId) {
   const { tenantId } = useTenant();
   const queryClient = useQueryClient();

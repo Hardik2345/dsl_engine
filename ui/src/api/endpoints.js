@@ -170,6 +170,13 @@ export const scheduleApi = {
     return data.schedule;
   },
 
+  remove: async (tenantId, workflowId, scheduleId) => {
+    const { data } = await api.delete(
+      `/tenants/${tenantId}/workflows/${workflowId}/schedules/${scheduleId}`
+    );
+    return data;
+  },
+
   pause: async (tenantId, workflowId, scheduleId) => {
     const { data } = await api.post(
       `/tenants/${tenantId}/workflows/${workflowId}/schedules/${scheduleId}/pause`

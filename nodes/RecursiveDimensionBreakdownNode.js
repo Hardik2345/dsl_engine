@@ -146,10 +146,12 @@ async function RecursiveDimensionBreakdownNode(def, context) {
           ? (metrics.baseline_atc_rate || null)
           : baseline_atc_sessions / baseline_sessions;
 
-      // For atc_rate base_metric, allow null CVR but require valid atc_rate
+      // Validation should depend on the metric we are analyzing.
+      // Sessions/order breakdowns do not require a valid CVR to be considered.
       const isAtcMetric = (base_metric === 'atc_rate');
-      if (!isAtcMetric && (current_cvr == null || baseline_cvr == null)) continue;
-      if (!isAtcMetric && baseline_cvr === 0) continue;
+      const isCvrMetric = (base_metric === 'cvr');
+      if (isCvrMetric && (current_cvr == null || baseline_cvr == null)) continue;
+      if (isCvrMetric && baseline_cvr === 0) continue;
       if (isAtcMetric && (current_atc_rate == null || baseline_atc_rate == null)) continue;
       if (isAtcMetric && baseline_atc_rate === 0) continue;
 

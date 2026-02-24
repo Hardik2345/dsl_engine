@@ -127,6 +127,28 @@ router.post('/:workflowId/schedules/:scheduleId/replay-missed', async (req, res,
   }
 });
 
+router.delete('/:workflowId/schedules/:scheduleId', async (req, res, next) => {
+  try {
+    const { tenantId, workflowId, scheduleId } = req.params;
+
+    const schedule = await WorkflowSchedule.findOneAndDelete({
+      _id: scheduleId,
+      tenantId,
+      workflowId
+    });
+
+    if (!schedule) {
+      return res.status(404).json({ error: 'schedule not found' });
+    }
+
+    await MissedTrigger.deleteMany({ tenantId, workflowId, scheduleId });
+
+    res.json({ deleted: true, scheduleId });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get('/:workflowId/schedules/:scheduleId/missed', async (req, res, next) => {
   try {
     const { tenantId, workflowId, scheduleId } = req.params;
