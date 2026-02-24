@@ -12,6 +12,7 @@ const { getRabbitWorkflowRunQueue } = require('./runQueue/RabbitWorkflowRunQueue
 async function processOne(workerId) {
   const run = await claimNextRunnableRun(workerId, 30000);
   if (!run) return null;
+  console.log(`[scheduler-worker] claimed run=${run._id} workflow=${run.workflowId} tenant=${run.tenantId} attempt=${(run.attempt || 0) + 1}/${run.maxAttempts || 3} backend=mongo`);
   return processClaimedRun(run);
 }
 
@@ -19,10 +20,13 @@ async function processClaimedRun(run) {
   if (!run) return null;
 
   try {
+    console.log(`[scheduler-worker] executing run=${run._id} workflow=${run.workflowId} tenant=${run.tenantId} trigger=${run.triggerType || 'unknown'} attempt=${run.attempt}/${run.maxAttempts || 3}`);
     await executeRun({ run });
+    console.log(`[scheduler-worker] completed run=${run._id} workflow=${run.workflowId} status=${run.status}`);
     await promoteDeferredRun(run.tenantId, run.workflowId, run.executionKey);
     return { runId: run._id, status: 'completed' };
   } catch (error) {
+    console.error(`[scheduler-worker] execution failed run=${run._id} workflow=${run.workflowId} attempt=${run.attempt}/${run.maxAttempts || 3} error=${error.message}`);
     const delayMs = getRetryDelayMs(
       { maxAttempts: run.maxAttempts || 3, backoffSeconds: [30, 120, 600] },
       run.attempt
@@ -33,6 +37,7 @@ async function processClaimedRun(run) {
       run.finishedAt = new Date();
       run.lastError = error.message;
       await run.save();
+      console.error(`[scheduler-worker] dead-lettered run=${run._id} workflow=${run.workflowId} lastError=${run.lastError}`);
       await promoteDeferredRun(run.tenantId, run.workflowId, run.executionKey);
       return { runId: run._id, status: 'dead_letter' };
     }
@@ -42,6 +47,7 @@ async function processClaimedRun(run) {
     run.lastError = error.message;
     run.finishedAt = null;
     await run.save();
+    console.warn(`[scheduler-worker] scheduled retry run=${run._id} workflow=${run.workflowId} nextRetryAt=${run.nextRetryAt.toISOString()} delayMs=${delayMs}`);
     return { runId: run._id, status: 'retrying' };
   }
 }
@@ -85,8 +91,10 @@ async function runLoopRabbit({ workerId, intervalMs = 2000, stopSignal }) {
       handler: async ({ runId }) => {
         const run = await claimRunById(runId, workerId, 30000);
         if (!run) {
+          console.log(`[scheduler-worker] skipped rabbit message run=${runId} reason=not_claimable_or_missing`);
           return;
         }
+        console.log(`[scheduler-worker] claimed run=${run._id} workflow=${run.workflowId} tenant=${run.tenantId} attempt=${run.attempt}/${run.maxAttempts || 3} backend=rabbit`);
         await processClaimedRun(run);
       }
     });

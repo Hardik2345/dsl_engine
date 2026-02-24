@@ -82,6 +82,13 @@ export default function RunDetailPage() {
     );
   };
 
+  const finalInsight = run?.context?.scratch?.finalInsight
+    || run?.nodeOutputs
+      ?.map((output) => output?.result?.delta?.scratch?.finalInsight)
+      .filter(Boolean)
+      .at(-1)
+    || null;
+
   return (
     <div>
       {/* Back Link */}
@@ -265,19 +272,19 @@ export default function RunDetailPage() {
           )}
 
           {/* Final Insight */}
-          {run?.context?.scratch?.finalInsight && (
+          {finalInsight && (
             <Card className="border-primary-200 bg-primary-50">
               <CardHeader>
                 <CardTitle className="text-primary-800">💡 Insight</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="text-sm text-primary-900 font-medium mb-3">
-                  {truncate(run.context.scratch.finalInsight.summary, 220)}
+                  {truncate(finalInsight.summary, 220)}
                 </div>
                 
-                {run.context.scratch.finalInsight.details && run.context.scratch.finalInsight.details.length > 0 && (
+                {finalInsight.details && finalInsight.details.length > 0 && (
                    <ul className="list-disc list-inside space-y-1 mb-3">
-                      {run.context.scratch.finalInsight.details.map((detail, idx) => {
+                      {finalInsight.details.map((detail, idx) => {
                         if (typeof detail !== 'string') {
                           return (
                             <li key={idx} className="text-xs text-primary-800">
@@ -336,11 +343,11 @@ export default function RunDetailPage() {
                    </ul>
                 )}
 
-                {run.context.scratch.finalInsight.confidence && (
+                {finalInsight.confidence !== undefined && finalInsight.confidence !== null && (
                   <div className="pt-2 border-t border-primary-200/50 flex justify-between items-center">
                     <span className="text-xs text-primary-700">Confidence Score</span>
                     <span className="text-xs font-bold text-primary-800">
-                        {(run.context.scratch.finalInsight.confidence * 100).toFixed(0)}%
+                        {(Number(finalInsight.confidence) * 100).toFixed(0)}%
                     </span>
                   </div>
                 )}

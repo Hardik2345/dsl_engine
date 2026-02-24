@@ -71,7 +71,10 @@ async function enqueueRun(params) {
     startedAt: now
   });
 
+  console.log(`[run-queue] created run=${run._id} workflow=${workflowId} tenant=${tenantId} status=${status} trigger=${triggerType}`);
+
   if (status === 'queued' && useRabbitRunQueue()) {
+    console.log(`[run-queue] dispatching run=${run._id} via rabbit exchange=${process.env.RABBITMQ_RUN_EXCHANGE || 'scheduler.runs'} routingKey=${process.env.RABBITMQ_RUN_ROUTING_KEY || 'workflow.run'}`);
     await getRabbitWorkflowRunQueue().publishRun(run._id, {
       triggerType,
       tenantId,
@@ -178,6 +181,7 @@ async function promoteDeferredRun(tenantId, workflowId, executionKey) {
   );
 
   if (promoted && useRabbitRunQueue()) {
+    console.log(`[run-queue] promoted deferred run=${promoted._id} workflow=${workflowId} tenant=${tenantId} -> queued; dispatching via rabbit`);
     await getRabbitWorkflowRunQueue().publishRun(promoted._id, {
       triggerType: promoted.triggerType || 'unknown',
       tenantId,
@@ -207,6 +211,7 @@ async function republishDueRetryRuns(limit = 100) {
     .lean();
 
   for (const run of due) {
+    console.log(`[run-queue] re-dispatch retry run=${run._id} workflow=${run.workflowId} tenant=${run.tenantId}`);
     await publishRunDispatch(run._id, {
       triggerType: run.triggerType || 'retry',
       tenantId: run.tenantId,
@@ -234,6 +239,7 @@ async function bootstrapDispatchRunnableRuns(limit = 500) {
     .lean();
 
   for (const run of runs) {
+    console.log(`[run-queue] bootstrap dispatch run=${run._id} workflow=${run.workflowId} tenant=${run.tenantId} status=${run.status}`);
     await publishRunDispatch(run._id, {
       triggerType: run.triggerType || 'unknown',
       tenantId: run.tenantId,

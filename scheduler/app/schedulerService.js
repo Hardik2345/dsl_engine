@@ -58,6 +58,47 @@ function buildDefaultContext(tenantId, payload) {
   };
 }
 
+function toIsoUtc(date) {
+  return new Date(date).toISOString();
+}
+
+function startOfUtcDay(dateInput) {
+  const date = new Date(dateInput);
+  return new Date(Date.UTC(
+    date.getUTCFullYear(),
+    date.getUTCMonth(),
+    date.getUTCDate(),
+    0, 0, 0, 0
+  ));
+}
+
+function buildPreviousCompleteDayContext(tenantId, triggerTime, payload = {}) {
+  const triggerDate = new Date(triggerTime);
+  const currentDayStart = startOfUtcDay(triggerDate);
+  const previousDayStart = new Date(currentDayStart.getTime() - 24 * 60 * 60 * 1000);
+  const baselineDayStart = new Date(previousDayStart.getTime() - 24 * 60 * 60 * 1000);
+
+  return {
+    meta: {
+      tenantId,
+      metric: payload?.metric || 'cvr',
+      triggeredAt: toIsoUtc(triggerDate),
+      window: {
+        start: toIsoUtc(previousDayStart),
+        end: toIsoUtc(currentDayStart)
+      },
+      baselineWindow: {
+        start: toIsoUtc(baselineDayStart),
+        end: toIsoUtc(previousDayStart)
+      }
+    },
+    filters: payload?.filters || [],
+    metrics: payload?.metrics || {},
+    rootCausePath: [],
+    scratch: {}
+  };
+}
+
 async function ingestEventTrigger({ tenantId, body }) {
   const brand = body.brand || tenantId;
   const alertType = body.alertType;
@@ -191,9 +232,8 @@ async function evaluateDueSchedules(now = new Date()) {
       version: null
     });
 
-    const context = buildDefaultContext(schedule.tenantId, {
-      metric: 'cvr',
-      occurredAt: now.toISOString()
+    const context = buildPreviousCompleteDayContext(schedule.tenantId, now, {
+      metric: 'cvr'
     });
 
     const queued = await enqueueRun({
@@ -277,9 +317,8 @@ async function replayMissedTriggers(scheduleId) {
       version: null
     });
 
-    const context = buildDefaultContext(schedule.tenantId, {
-      metric: 'cvr',
-      occurredAt: missed.intendedRunAt.toISOString()
+    const context = buildPreviousCompleteDayContext(schedule.tenantId, missed.intendedRunAt, {
+      metric: 'cvr'
     });
 
     const queued = await enqueueRun({
