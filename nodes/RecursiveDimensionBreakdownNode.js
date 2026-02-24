@@ -15,6 +15,11 @@ async function RecursiveDimensionBreakdownNode(def, context) {
     output_key,
     next
   } = def;
+  const debugEnabled = String(process.env.DEBUG_RECURSIVE_BREAKDOWN || '').toLowerCase() === 'true';
+  const debugPrefix = `[recursive-breakdown:${def.id || 'unknown'}]`;
+  const debugLog = (...args) => {
+    if (debugEnabled) console.log(debugPrefix, ...args);
+  };
 
   const {
     max_depth = 1,
@@ -43,6 +48,7 @@ async function RecursiveDimensionBreakdownNode(def, context) {
   }
 
   if (!metrics || metrics.cvr_delta_pct == null) {
+    debugLog('global metrics missing cvr_delta_pct');
     return {
       status: 'fail',
       reason: 'RecursiveDimensionBreakdownNode: global metrics missing'
@@ -74,9 +80,23 @@ async function RecursiveDimensionBreakdownNode(def, context) {
     });
 
     const result = await queryExecutor.execute(querySpec);
+    debugLog('query executed', {
+      depth,
+      dimension: activeDimension,
+      filters: activeFilters,
+      rowCount: result?.rows?.length || 0
+    });
     if (!result?.rows?.length) return;
 
     const candidates = [];
+    const dropCounts = {
+      minSessions: 0,
+      cvrUnavailable: 0,
+      atcUnavailable: 0,
+      filterModeDrop: 0,
+      filterModeIncrease: 0,
+      baselineCvrRequired: 0
+    };
     let totalBaselineSessions = 0;
     let totalCurrentSessions = 0;
     let totalBaselineOrders = 0;
@@ -118,11 +138,20 @@ async function RecursiveDimensionBreakdownNode(def, context) {
       const currentLow = current_sessions < min_current_sessions;
       const baselineLow = baseline_sessions < min_baseline_sessions;
       if (min_sessions_mode === 'baseline_only') {
-        if (baselineLow) continue;
+        if (baselineLow) {
+          dropCounts.minSessions += 1;
+          continue;
+        }
       } else if (min_sessions_mode === 'either_low') {
-        if (currentLow || baselineLow) continue;
+        if (currentLow || baselineLow) {
+          dropCounts.minSessions += 1;
+          continue;
+        }
       } else {
-        if (currentLow && baselineLow) continue;
+        if (currentLow && baselineLow) {
+          dropCounts.minSessions += 1;
+          continue;
+        }
       }
 
       const current_cvr =
@@ -150,10 +179,22 @@ async function RecursiveDimensionBreakdownNode(def, context) {
       // Sessions/order breakdowns do not require a valid CVR to be considered.
       const isAtcMetric = (base_metric === 'atc_rate');
       const isCvrMetric = (base_metric === 'cvr');
-      if (isCvrMetric && (current_cvr == null || baseline_cvr == null)) continue;
-      if (isCvrMetric && baseline_cvr === 0) continue;
-      if (isAtcMetric && (current_atc_rate == null || baseline_atc_rate == null)) continue;
-      if (isAtcMetric && baseline_atc_rate === 0) continue;
+      if (isCvrMetric && (current_cvr == null || baseline_cvr == null)) {
+        dropCounts.cvrUnavailable += 1;
+        continue;
+      }
+      if (isCvrMetric && baseline_cvr === 0) {
+        dropCounts.baselineCvrRequired += 1;
+        continue;
+      }
+      if (isAtcMetric && (current_atc_rate == null || baseline_atc_rate == null)) {
+        dropCounts.atcUnavailable += 1;
+        continue;
+      }
+      if (isAtcMetric && baseline_atc_rate === 0) {
+        dropCounts.atcUnavailable += 1;
+        continue;
+      }
 
       const cvr_delta_pct =
         (baseline_cvr == null || baseline_cvr === 0)
@@ -170,17 +211,10 @@ async function RecursiveDimensionBreakdownNode(def, context) {
           ? null
           : ((current_atc_sessions - baseline_atc_sessions) / baseline_atc_sessions) * 100;
 
-      if (filter_mode === 'drop') {
-        if (isAtcMetric && (atc_rate_delta_pct == null || atc_rate_delta_pct >= 0)) continue;
-        if (!isAtcMetric && (cvr_delta_pct == null || cvr_delta_pct >= 0)) continue;
+      if (rank_by === 'baseline_cvr' && baseline_cvr_calc == null) {
+        dropCounts.baselineCvrRequired += 1;
+        continue;
       }
-
-      if (filter_mode === 'increase') {
-        if (isAtcMetric && (atc_rate_delta_pct == null || atc_rate_delta_pct <= 0)) continue;
-        if (!isAtcMetric && (cvr_delta_pct == null || cvr_delta_pct <= 0)) continue;
-      }
-
-      if (rank_by === 'baseline_cvr' && baseline_cvr_calc == null) continue;
 
       const orders_delta_pct =
         baseline_orders === 0
@@ -191,6 +225,28 @@ async function RecursiveDimensionBreakdownNode(def, context) {
         baseline_sessions === 0
           ? null
           : ((current_sessions - baseline_sessions) / baseline_sessions) * 100;
+
+      const directionalDeltaPct = (
+        base_metric === 'sessions' ? sessions_delta_pct
+          : base_metric === 'orders' ? orders_delta_pct
+            : base_metric === 'atc_rate' ? atc_rate_delta_pct
+              : base_metric === 'atc_sessions' ? atc_sessions_delta_pct
+                : cvr_delta_pct
+      );
+
+      if (filter_mode === 'drop') {
+        if (directionalDeltaPct == null || directionalDeltaPct >= 0) {
+          dropCounts.filterModeDrop += 1;
+          continue;
+        }
+      }
+
+      if (filter_mode === 'increase') {
+        if (directionalDeltaPct == null || directionalDeltaPct <= 0) {
+          dropCounts.filterModeIncrease += 1;
+          continue;
+        }
+      }
 
       const baselineShare =
         totalBaselineSessions === 0 ? 0 : baseline_sessions / totalBaselineSessions;
@@ -243,6 +299,12 @@ async function RecursiveDimensionBreakdownNode(def, context) {
       });
     }
 
+    debugLog('candidate filtering result', {
+      depth,
+      dimension: activeDimension,
+      candidateCount: candidates.length,
+      dropCounts
+    });
     if (!candidates.length) return;
 
     const filteredCandidates = candidates;
@@ -288,6 +350,18 @@ async function RecursiveDimensionBreakdownNode(def, context) {
     });
 
     const topCandidates = filteredCandidates.slice(0, top_k);
+    debugLog('ranking result', {
+      depth,
+      dimension: activeDimension,
+      topK: top_k,
+      selectedCount: topCandidates.length,
+      selectedPreview: topCandidates.slice(0, 3).map((e) => ({
+        value: e.display_value ?? e.value,
+        sessionsDeltaPct: e.deltas?.sessions_delta_pct,
+        cvrDeltaPct: e.deltas?.cvr_delta_pct,
+        atcRateDeltaPct: e.deltas?.atc_rate_delta_pct
+      }))
+    });
 
     // ---------- Phase 3: store evidence + recurse ----------
     for (const entry of topCandidates) {
@@ -352,6 +426,16 @@ async function RecursiveDimensionBreakdownNode(def, context) {
     return rank_order === 'asc' ? aScore - bScore : bScore - aScore;
   });
   const topEvidence = rankedEvidence[0] || null;
+  debugLog('final evidence summary', {
+    mergedEvidenceCount: mergedEvidence.length,
+    rankedEvidenceCount: rankedEvidence.length,
+    topEvidence: topEvidence ? {
+      dimension: topEvidence.dimension,
+      value: topEvidence.display_value ?? topEvidence.value,
+      sessionsDeltaPct: topEvidence.deltas?.sessions_delta_pct,
+      cvrDeltaPct: topEvidence.deltas?.cvr_delta_pct
+    } : null
+  });
 
   const outputMetrics = topEvidence
     ? {
