@@ -4,6 +4,7 @@ const ALLOWED_NODE_TYPES = new Set([
   'branch',
   'recursive_dimension_breakdown',
   'composite',
+  'workflow_ref',
   'insight'
 ]);
 
@@ -133,6 +134,25 @@ function validateWorkflowDefinition(definition) {
     if (node.type === 'composite') {
       if (!Array.isArray(node.steps) || node.steps.length === 0) {
         errors.push(`composite node ${node.id} must include steps`);
+      }
+    }
+
+    if (node.type === 'workflow_ref') {
+      if (!node.ref || typeof node.ref !== 'object') {
+        errors.push(`workflow_ref node ${node.id} must include ref`);
+      } else {
+        if (!node.ref.workflow_id || typeof node.ref.workflow_id !== 'string') {
+          errors.push(`workflow_ref node ${node.id} must include ref.workflow_id`);
+        }
+        if (!node.ref.version || typeof node.ref.version !== 'string') {
+          errors.push(`workflow_ref node ${node.id} must include ref.version`);
+        }
+        if (
+          node.ref.scope !== undefined &&
+          !['tenant', 'global'].includes(node.ref.scope)
+        ) {
+          errors.push(`workflow_ref node ${node.id} has invalid ref.scope`);
+        }
       }
     }
 

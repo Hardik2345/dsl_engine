@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { WorkflowBuilder, PageSpinner } from '../components';
 import { useQueryClient } from '@tanstack/react-query';
-import { useWorkflow, useCreateGlobalWorkflow, useCreateWorkflowVersion, useCreateGlobalWorkflowVersion, useTenants } from '../api/hooks';
+import { useWorkflow, useWorkflows, useCreateGlobalWorkflow, useCreateWorkflowVersion, useCreateGlobalWorkflowVersion, useTenants } from '../api/hooks';
 import { workflowApi } from '../api/endpoints';
 import { useTenant } from '../context/TenantContext';
 import toast from 'react-hot-toast';
@@ -56,6 +56,7 @@ export default function WorkflowBuilderPage() {
   const queryClient = useQueryClient();
   const { tenantId } = useTenant();
   const { data: tenants = [], isLoading: tenantsLoading } = useTenants();
+  const { data: availableWorkflows = [] } = useWorkflows();
   const createGlobalWorkflow = useCreateGlobalWorkflow();
   const [scope, setScope] = useState('single'); // 'single' | 'multiple' | 'global'
   const [selectedTenantIds, setSelectedTenantIds] = useState([]);
@@ -85,6 +86,18 @@ export default function WorkflowBuilderPage() {
       .map((tenant) => tenant.tenantId)
       .sort();
   }, [tenants]);
+
+  const workflowImportOptions = useMemo(() => {
+    return (Array.isArray(availableWorkflows) ? availableWorkflows : [])
+      .filter((workflow) => workflow?.workflowId && workflow?.isActive !== false)
+      .map((workflow) => ({
+        workflowId: workflow.workflowId,
+        name: workflow.name || workflow.workflowId,
+        scope: workflow.scope || 'tenant',
+        latestVersion: workflow.latestVersion || null,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [availableWorkflows]);
 
   const resolvedTenantIds = useMemo(() => {
     if (scope === 'multiple') return selectedTenantIds;
@@ -224,6 +237,7 @@ export default function WorkflowBuilderPage() {
         <WorkflowBuilder 
           initialData={initialData}
           onSave={handleSave}
+          workflowImportOptions={workflowImportOptions}
           onBack={() => navigate(isEditing ? `/workflows/${workflowId}` : '/workflows')}
           isEditing={isEditing}
           scope={scope}

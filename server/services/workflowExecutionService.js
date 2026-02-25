@@ -1,45 +1,17 @@
-const Workflow = require('../models/Workflow');
-const WorkflowVersion = require('../models/WorkflowVersion');
 const WorkflowRun = require('../models/WorkflowRun');
 const Insight = require('../models/Insight');
 const { pruneWorkflowRuns } = require('../lib/retention');
 const WorkflowRunner = require('../../engine/WorkflowRunner');
+const workflowResolverService = require('./workflowResolverService');
 
 async function resolveWorkflowVersion({ tenantId, workflowId, version }) {
-  let workflow = await Workflow.findOne({ tenantId, workflowId }).lean();
-  if (!workflow) {
-    workflow = await Workflow.findOne({ scope: 'global', tenantId: null, workflowId }).lean();
-  }
-  if (!workflow || !workflow.isActive) {
-    const err = new Error('workflow not found');
-    err.status = 404;
-    throw err;
-  }
-
-  const versionId = version || workflow.latestVersion;
-  const scope = workflow.scope || 'tenant';
-  const scopeClause = scope === 'global'
-    ? { scope: 'global' }
-    : { $or: [{ scope: 'tenant' }, { scope: { $exists: false } }] };
-
-  const workflowVersion = await WorkflowVersion.findOne({
-    tenantId: workflow.tenantId ?? null,
+  return workflowResolverService.resolveWorkflowVersion({
+    tenantId,
     workflowId,
-    version: versionId,
-    ...scopeClause
-  }).lean();
-
-  if (!workflowVersion) {
-    const err = new Error('workflow version not found');
-    err.status = 404;
-    throw err;
-  }
-
-  return {
-    workflow,
-    workflowVersion,
-    versionId
-  };
+    version,
+    allowGlobalFallback: true,
+    allowedScopes: ['tenant', 'global']
+  });
 }
 
 async function persistFinalInsight({ tenantId, workflowId, runId, context }) {
@@ -64,7 +36,9 @@ async function executeRun({ run, runId }) {
 
   const nodeOutputs = [];
   const runner = new WorkflowRunner(targetRun.definitionJson, {
-    onNodeResult: payload => nodeOutputs.push(payload)
+    onNodeResult: payload => nodeOutputs.push(payload),
+    workflowResolver: workflowResolverService,
+    workflowIdentity: `${targetRun.tenantId}/${targetRun.workflowId}@${targetRun.version}`
   });
 
   const startedAt = targetRun.startedAt || new Date();

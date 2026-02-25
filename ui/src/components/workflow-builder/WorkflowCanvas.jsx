@@ -7,6 +7,7 @@ import { BranchNode } from './nodes/BranchNode';
 import { AnalysisNode } from './nodes/AnalysisNode';
 import { InsightNode } from './nodes/InsightNode';
 import { CompositeNode } from './nodes/CompositeNode';
+import { WorkflowRefNode } from './nodes/WorkflowRefNode';
 import DeletableEdge from './edges/DeletableEdge';
 
 const nodeTypes = {
@@ -15,6 +16,7 @@ const nodeTypes = {
   analysis: AnalysisNode,
   insight: InsightNode,
   composite: CompositeNode,
+  workflow_ref: WorkflowRefNode,
 };
 
 const edgeTypes = {

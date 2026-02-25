@@ -4,17 +4,21 @@ const metricCompareNode = require('./MetricCompareNode');
 const recursiveDimensionBreakdownNode = require('./RecursiveDimensionBreakdownNode');
 const branchNode = require('./BranchNode');
 const insightNode = require('./InsightNode');
+const workflowRefNode = require('./WorkflowRefNode');
 
 const NodeRegistry = {
   validation: validationNode,
   metric_compare: metricCompareNode,
   recursive_dimension_breakdown: recursiveDimensionBreakdownNode,
   branch: branchNode,
+  workflow_ref: workflowRefNode,
   insight: insightNode
 };
 
-async function CompositeNode(def, context, nodeMap) {
+async function CompositeNode(def, context, nodeMapOrOptions) {
   const { steps = [], next } = def;
+  const nodeMap = nodeMapOrOptions?.nodeMap || nodeMapOrOptions;
+  const runtime = nodeMapOrOptions?.runtime;
 
   if (!Array.isArray(steps) || steps.length === 0) {
     return {
@@ -48,7 +52,9 @@ async function CompositeNode(def, context, nodeMap) {
       };
     }
 
-    const result = await executor(stepDef, context);
+    const result = stepDef.type === 'workflow_ref'
+      ? await executor(stepDef, context, runtime)
+      : await executor(stepDef, context);
 
     if (!result || typeof result !== 'object') {
       return {
@@ -58,6 +64,10 @@ async function CompositeNode(def, context, nodeMap) {
     }
 
     // --- failure handling ---
+    if (result.status === 'terminated') {
+      return result;
+    }
+
     if (result.status === 'fail') {
       const onFail = stepDef.on_fail;
 

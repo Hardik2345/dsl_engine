@@ -438,11 +438,21 @@ function buildValidationCondition(scope, op, value) {
   return `${scope} ${op} ${value}`;
 }
 
-export default function PropertiesPanel({ selectedNode, onChange, onClose, onDelete }) {
+export default function PropertiesPanel({
+  selectedNode,
+  onChange,
+  onClose,
+  onDelete,
+  workflowImportOptions = [],
+  onAttachWorkflowToRule,
+  isAttachingWorkflow = false,
+}) {
   const [data, setData] = useState(selectedNode?.data || {});
+  const [ruleWorkflowSelections, setRuleWorkflowSelections] = useState({});
 
   useEffect(() => {
     setData(selectedNode?.data || {});
+    setRuleWorkflowSelections({});
   }, [selectedNode]);
 
   const handleChange = (field, value) => {
@@ -505,6 +515,7 @@ export default function PropertiesPanel({ selectedNode, onChange, onClose, onDel
             {(data.rules || []).map((rule, ruleIdx) => {
                const isBreakdownsRule = !!rule.any_in_breakdowns;
                const isOr = !isBreakdownsRule && rule.any && rule.any.length > 0;
+               const ruleId = rule._ruleId || `legacy_rule_${ruleIdx}`;
                const currentList = isBreakdownsRule
                  ? (rule.any_in_breakdowns?.conditions || [])
                  : (isOr ? rule.any : (rule.all || []));
@@ -730,6 +741,49 @@ export default function PropertiesPanel({ selectedNode, onChange, onClose, onDel
                         >
                             <Plus className="w-3 h-3" /> Add Condition
                         </button>
+
+                       <div className="mt-3 pt-2 border-t border-gray-200">
+                         <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-2">
+                           Attach Existing Workflow
+                         </div>
+                         <div className="flex gap-2 items-center min-w-0">
+                           <select
+                             className="flex-1 min-w-0 border p-1 rounded text-[11px] bg-white"
+                             value={ruleWorkflowSelections[ruleId] || ''}
+                             onChange={(e) => {
+                               setRuleWorkflowSelections((prev) => ({
+                                 ...prev,
+                                 [ruleId]: e.target.value,
+                               }));
+                             }}
+                           >
+                             <option value="">Select workflow...</option>
+                             {workflowImportOptions.map((workflow) => (
+                               <option key={workflow.workflowId} value={workflow.workflowId}>
+                                 {workflow.name} ({workflow.scope}{workflow.latestVersion ? ` v${workflow.latestVersion}` : ''})
+                               </option>
+                             ))}
+                           </select>
+                           <button
+                             type="button"
+                             disabled={!ruleWorkflowSelections[ruleId] || isAttachingWorkflow || !onAttachWorkflowToRule}
+                             onClick={() =>
+                               onAttachWorkflowToRule?.({
+                                 branchNodeId: selectedNode.id,
+                                 ruleId,
+                                 workflowId: ruleWorkflowSelections[ruleId],
+                               })
+                             }
+                             className={`px-2 py-1 rounded text-[11px] border ${
+                               !ruleWorkflowSelections[ruleId] || isAttachingWorkflow || !onAttachWorkflowToRule
+                                 ? 'border-gray-200 text-gray-400 bg-gray-100 cursor-not-allowed'
+                                 : 'border-blue-300 text-blue-700 bg-blue-50 hover:bg-blue-100'
+                             } shrink-0`}
+                           >
+                             {isAttachingWorkflow ? 'Attaching...' : 'Attach'}
+                           </button>
+                         </div>
+                       </div>
                     </div>
                   </div>
                );
@@ -878,6 +932,64 @@ export default function PropertiesPanel({ selectedNode, onChange, onClose, onDel
                     <Plus className="w-3 h-3" /> Add Step
                 </button>
             </div>
+        );
+
+      case 'workflow_ref':
+        return (
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Referenced Workflow Name</label>
+              <input
+                type="text"
+                value={data.referencedWorkflowName || ''}
+                onChange={(e) => handleChange('referencedWorkflowName', e.target.value)}
+                className="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                placeholder="Display name"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Workflow ID</label>
+              <input
+                type="text"
+                value={data.ref?.workflow_id || ''}
+                onChange={(e) =>
+                  handleChange('ref', { ...(data.ref || {}), workflow_id: e.target.value })
+                }
+                className="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 font-mono"
+                placeholder="wf_..."
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Version</label>
+                <input
+                  type="text"
+                  value={data.ref?.version || ''}
+                  onChange={(e) =>
+                    handleChange('ref', { ...(data.ref || {}), version: e.target.value })
+                  }
+                  className="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 font-mono"
+                  placeholder="1.0"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Scope</label>
+                <select
+                  value={data.ref?.scope || 'tenant'}
+                  onChange={(e) =>
+                    handleChange('ref', { ...(data.ref || {}), scope: e.target.value })
+                  }
+                  className="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                >
+                  <option value="tenant">tenant</option>
+                  <option value="global">global</option>
+                </select>
+              </div>
+            </div>
+            <div className="text-[11px] text-gray-500">
+              This node executes the referenced workflow using the current run context (same tenant/date window).
+            </div>
+          </div>
         );
 
       case 'analysis':

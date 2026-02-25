@@ -1,5 +1,5 @@
-import React, { useCallback, useState, useEffect } from 'react';
-import { ReactFlowProvider, useNodesState, useEdgesState, addEdge, MarkerType } from '@xyflow/react';
+import React, { useCallback, useMemo, useState, useEffect } from 'react';
+import { ReactFlowProvider, useNodesState, useEdgesState, addEdge, MarkerType, useReactFlow } from '@xyflow/react';
 import { ArrowLeft, Save, Layout } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -8,9 +8,26 @@ import WorkflowCanvas from './WorkflowCanvas';
 import PropertiesPanel from './PropertiesPanel';
 import { jsonToGraph, graphToJson } from '../../utils/workflowTransformers';
 
+const sanitizeIdSegment = (value) =>
+  String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, '_')
+    .replace(/^_+|_+$/g, '') || 'imported';
+
+const getUniqueNodeId = (preferredId, usedIds) => {
+  let candidate = preferredId;
+  let suffix = 1;
+  while (usedIds.has(candidate)) {
+    candidate = `${preferredId}_${suffix++}`;
+  }
+  usedIds.add(candidate);
+  return candidate;
+};
+
 function WorkflowBuilderContent({
   initialData,
   onSave,
+  workflowImportOptions,
   onBack,
   isEditing,
   scope,
@@ -22,10 +39,16 @@ function WorkflowBuilderContent({
   currentTenantId,
   isSaving,
 }) {
+  const { fitView } = useReactFlow();
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [selectedNode, setSelectedNode] = useState(null);
   const [metadata, setMetadata] = useState(initialData || {});
+  const [isAttachingWorkflowRef, setIsAttachingWorkflowRef] = useState(false);
+  const workflowImportOptionMap = useMemo(
+    () => new Map((workflowImportOptions || []).map((item) => [item.workflowId, item])),
+    [workflowImportOptions]
+  );
 
   // Initialize graph from JSON on mount
   useEffect(() => {
@@ -125,6 +148,121 @@ function WorkflowBuilderContent({
       setEdges((eds) => eds.filter((e) => e.source !== id && e.target !== id));
       setSelectedNode(null);
   };
+
+  const handleAttachWorkflowToBranchRule = useCallback(
+    async ({ branchNodeId, ruleId, workflowId }) => {
+      if (!branchNodeId || !ruleId || !workflowId) {
+        toast.error('Missing branch rule or workflow selection');
+        return;
+      }
+
+      setIsAttachingWorkflowRef(true);
+      try {
+        const targetWorkflow = workflowImportOptionMap.get(workflowId);
+        if (!targetWorkflow) {
+          throw new Error('Selected workflow is not available');
+        }
+        if (!targetWorkflow.latestVersion) {
+          throw new Error('Selected workflow has no latest version');
+        }
+
+        const branchNode = nodes.find((node) => node.id === branchNodeId);
+        if (!branchNode || branchNode.type !== 'branch') {
+          throw new Error('Selected node is not a branch');
+        }
+
+        const branchRules = Array.isArray(branchNode.data?.rules) ? branchNode.data.rules : [];
+        const ruleIndex = branchRules.findIndex((rule, idx) => {
+          const stableRuleId = rule?._ruleId || `legacy_rule_${idx}`;
+          return stableRuleId === ruleId;
+        });
+        if (ruleIndex === -1) {
+          throw new Error('Branch rule not found');
+        }
+
+        const usedReactIds = new Set(nodes.map((node) => node.id));
+        const usedBackendNodeIds = new Set(nodes.map((node) => node.data?.id).filter(Boolean));
+        const reactNodeId = getUniqueNodeId(`node_${Date.now().toString(36)}`, usedReactIds);
+        const backendNodeId = getUniqueNodeId(
+          `workflow_ref_${sanitizeIdSegment(workflowId)}`,
+          usedBackendNodeIds
+        );
+
+        const workflowRefNode = {
+          id: reactNodeId,
+          type: 'workflow_ref',
+          position: {
+            x: (branchNode.position?.x ?? 0) + 420,
+            y: branchNode.position?.y ?? 0,
+          },
+          data: {
+            id: backendNodeId,
+            type: 'workflow_ref',
+            ref: {
+              workflow_id: workflowId,
+              version: targetWorkflow.latestVersion,
+              scope: targetWorkflow.scope || 'tenant',
+            },
+            referencedWorkflowName: targetWorkflow.name || workflowId,
+          },
+        };
+
+        const updatedNodes = nodes.map((node) => {
+          if (node.id !== branchNodeId) return node;
+          const nextRules = [...branchRules];
+          nextRules[ruleIndex] = { ...nextRules[ruleIndex], then: backendNodeId };
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              rules: nextRules,
+            },
+          };
+        });
+
+        const updatedRuleEdge = {
+          id: `${branchNodeId}-rule-${ruleId}-${reactNodeId}`,
+          source: branchNodeId,
+          sourceHandle: `handle-rule-${ruleId}`,
+          target: reactNodeId,
+          type: 'deletable',
+          label: `Rule ${ruleIndex + 1}`,
+          markerEnd: { type: MarkerType.ArrowClosed },
+          style: { stroke: '#9333ea' },
+        };
+
+        const updatedEdges = [
+          ...edges.filter(
+            (edge) => !(edge.source === branchNodeId && edge.sourceHandle === `handle-rule-${ruleId}`)
+          ),
+          updatedRuleEdge,
+        ];
+        const finalNodes = [...updatedNodes, workflowRefNode];
+        const finalEdges = updatedEdges;
+
+        setNodes(finalNodes);
+        setEdges(finalEdges);
+        requestAnimationFrame(() => {
+          fitView({ padding: 0.2, duration: 250 });
+        });
+
+        if (selectedNode?.id === branchNodeId) {
+          const refreshedBranch = finalNodes.find((node) => node.id === branchNodeId);
+          if (refreshedBranch) {
+            setSelectedNode(refreshedBranch);
+          }
+        }
+
+        toast.success(`Attached workflow reference "${targetWorkflow.name || workflowId}" to rule ${ruleIndex + 1}`);
+      } catch (error) {
+        console.error(error);
+        toast.error(error?.message || 'Failed to attach workflow reference');
+      } finally {
+        setIsAttachingWorkflowRef(false);
+      }
+    },
+    [workflowImportOptionMap, nodes, edges, selectedNode, setNodes, setEdges, fitView]
+  );
 
   const handleSave = async () => {
     try {
@@ -296,6 +434,9 @@ function WorkflowBuilderContent({
             onChange={handleNodeUpdate}
             onClose={() => setSelectedNode(null)}
             onDelete={handleNodeDelete}
+            workflowImportOptions={workflowImportOptions}
+            onAttachWorkflowToRule={handleAttachWorkflowToBranchRule}
+            isAttachingWorkflow={isAttachingWorkflowRef}
           />
         )}
       </div>
