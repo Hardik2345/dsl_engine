@@ -1,88 +1,12 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { X, Plus, Trash2 } from 'lucide-react';
 import SuggestionInput from '../SuggestionInput';
+import { INSIGHT_BASE_TOKENS } from '../../constants/insightTokens';
+import { OUTPUT_KEY_SUGGESTIONS } from '../../constants/workflowOutputKeys';
 
 // Generate unique ID for rules
 const generateRuleId = () => `rule_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 
-const INSIGHT_TOKENS = [
-  'cvr_delta_pct',
-  'sessions_delta_pct',
-  'orders_delta_pct',
-  'atc_rate_delta_pct',
-  'atc_sessions_delta_pct',
-  'current_orders',
-  'baseline_orders',
-  'current_sessions',
-  'baseline_sessions',
-  'current_atc_sessions',
-  'baseline_atc_sessions',
-  'current_cvr',
-  'baseline_cvr',
-  'current_atc_rate',
-  'baseline_atc_rate',
-  'dimension',
-  'dimension_label',
-  'value',
-  'top1_dimension',
-  'top1_dimension_label',
-  'top1_value',
-  'top1_cvr_delta_pct_fmt',
-  'top1_atc_rate_delta_pct_fmt',
-  'top1_sessions_delta_pct',
-  'top1_sessions_delta_pct_fmt',
-  'top1_orders_delta_pct',
-  'top1_orders_delta_pct_fmt',
-  'top2_dimension',
-  'top2_dimension_label',
-  'top2_value',
-  'top2_cvr_delta_pct_fmt',
-  'top2_atc_rate_delta_pct_fmt',
-  'top2_sessions_delta_pct',
-  'top2_sessions_delta_pct_fmt',
-  'top2_orders_delta_pct',
-  'top2_orders_delta_pct_fmt',
-  'top3_dimension',
-  'top3_dimension_label',
-  'top3_value',
-  'top3_cvr_delta_pct_fmt',
-  'top3_atc_rate_delta_pct_fmt',
-  'top3_sessions_delta_pct',
-  'top3_sessions_delta_pct_fmt',
-  'top3_orders_delta_pct',
-  'top3_orders_delta_pct_fmt',
-  'top4_dimension',
-  'top4_dimension_label',
-  'top4_value',
-  'top4_cvr_delta_pct_fmt',
-  'top4_atc_rate_delta_pct_fmt',
-  'top4_sessions_delta_pct',
-  'top4_sessions_delta_pct_fmt',
-  'top4_orders_delta_pct',
-  'top4_orders_delta_pct_fmt',
-  'confidence_score',
-  'cvr_delta_pct_fmt',
-  'sessions_delta_pct_fmt',
-  'orders_delta_pct_fmt',
-  'current_cvr_pct',
-  'baseline_cvr_pct',
-  'top_current_cvr_pct',
-  'top_baseline_cvr_pct',
-  'top_cvr_delta_pct_fmt',
-  'top_atc_rate_delta_pct_fmt',
-  'top_atc_sessions_delta_pct_fmt',
-  'top_current_sessions',
-  'top_baseline_sessions',
-  'top_current_orders',
-  'top_baseline_orders',
-  'top_current_atc_sessions',
-  'top_baseline_atc_sessions',
-  'top_current_atc_rate_pct',
-  'top_baseline_atc_rate_pct',
-  'top_sessions_delta_pct_fmt',
-  'baseline_top5_pages',
-  'baseline_bottom5_pages'
-];
 
 const METRIC_OPTIONS = [
   'orders',
@@ -116,14 +40,6 @@ const MIN_SESSIONS_MODE_OPTIONS = [
   { value: 'baseline_only', label: 'Require baseline only' }
 ];
 
-const OUTPUT_KEY_SUGGESTIONS = [
-  'baseline_top5_pages',
-  'baseline_bottom5_pages',
-  'top_pages',
-  'bottom_pages',
-  'top_segments',
-  'bottom_segments'
-];
 
 const DIMENSION_OPTIONS = [
   'product_id',
@@ -336,7 +252,7 @@ function DimensionMultiSelect({ value, onChange, placeholder }) {
   );
 }
 
-function OutputKeyInput({ value, onChange, placeholder }) {
+function OutputKeyInput({ value, onChange, placeholder, suggestions = OUTPUT_KEY_SUGGESTIONS }) {
   return (
     <SuggestionInput
       value={value}
@@ -344,21 +260,21 @@ function OutputKeyInput({ value, onChange, placeholder }) {
       onSubmit={(next) => onChange(next.trim())}
       onPick={(next) => onChange(next)}
       placeholder={placeholder}
-      suggestions={OUTPUT_KEY_SUGGESTIONS}
+      suggestions={suggestions}
       footerLabel="Suggestions"
     />
   );
 }
 
-function TokenTextarea({ value, onChange, placeholder, className }) {
+function TokenTextarea({ value, onChange, placeholder, className, tokenSuggestions = INSIGHT_BASE_TOKENS }) {
   const textareaRef = useRef(null);
   const [context, setContext] = useState(null);
 
   const suggestions = useMemo(() => {
     if (!context) return [];
     const q = context.query || '';
-    return INSIGHT_TOKENS.filter((token) => token.startsWith(q));
-  }, [context]);
+    return tokenSuggestions.filter((token) => token.startsWith(q));
+  }, [context, tokenSuggestions]);
 
   const updateContext = (text, caret) => {
     const next = getTokenContext(text, caret);
@@ -446,6 +362,7 @@ export default function PropertiesPanel({
   workflowImportOptions = [],
   onAttachWorkflowToRule,
   isAttachingWorkflow = false,
+  breakdownOutputKeySuggestions = [],
 }) {
   const [data, setData] = useState(selectedNode?.data || {});
   const [ruleWorkflowSelections, setRuleWorkflowSelections] = useState({});
@@ -1092,10 +1009,14 @@ export default function PropertiesPanel({
                      </div>
                      <div>
                           <label className="block text-xs font-medium text-gray-500 mb-1">Output Key (optional)</label>
-                          <OutputKeyInput
+                      <OutputKeyInput
                               value={data.output_key || ''}
                               onChange={(nextValue) => handleChange('output_key', nextValue)}
                               placeholder="baseline_top5_pages"
+                              suggestions={Array.from(new Set([
+                                ...OUTPUT_KEY_SUGGESTIONS,
+                                ...breakdownOutputKeySuggestions
+                              ]))}
                           />
                      </div>
                      <div className="pt-2 border-t">
@@ -1177,9 +1098,30 @@ export default function PropertiesPanel({
 
       case 'insight':
           const isStructured = typeof data.template === 'object' && data.template !== null;
+          const mergedInsightTokens = Array.from(new Set([
+            ...INSIGHT_BASE_TOKENS,
+            ...OUTPUT_KEY_SUGGESTIONS,
+            ...breakdownOutputKeySuggestions
+          ]));
           
           return (
              <div className="space-y-4">
+                 <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Output Key (optional)</label>
+                    <OutputKeyInput
+                      value={data.output_key || ''}
+                      onChange={(nextValue) => handleChange('output_key', nextValue)}
+                      placeholder="atc_rate_product_drops"
+                      suggestions={Array.from(new Set([
+                        ...OUTPUT_KEY_SUGGESTIONS,
+                        ...breakdownOutputKeySuggestions
+                      ]))}
+                    />
+                    <div className="text-[10px] text-gray-400 mt-1">
+                      If set, this insight reads evidence from the matching breakdown output key.
+                    </div>
+                 </div>
+
                  <div>
                     <label className="block text-xs font-medium text-gray-500 mb-1">Template Type</label>
                     <div className="flex gap-2">
@@ -1206,6 +1148,7 @@ export default function PropertiesPanel({
                             value={typeof data.template === 'string' ? data.template : ''}
                             onChange={(nextValue) => handleChange('template', nextValue)}
                             placeholder="Analysis complete for {{cvr_delta_pct_fmt}}..."
+                            tokenSuggestions={mergedInsightTokens}
                         />
                          <div className="text-[10px] text-gray-400 mt-1">
                              Use {'{{variable}}'} for dynamic values.
@@ -1220,6 +1163,7 @@ export default function PropertiesPanel({
                                 value={data.template.summary || ''}
                                 onChange={(nextValue) => handleChange('template', { ...data.template, summary: nextValue })}
                                 placeholder="Summary text..."
+                                tokenSuggestions={mergedInsightTokens}
                             />
                          </div>
                          
@@ -1235,6 +1179,7 @@ export default function PropertiesPanel({
                                             newDetails[idx] = nextValue;
                                             handleChange('template', { ...data.template, details: newDetails });
                                         }}
+                                        tokenSuggestions={mergedInsightTokens}
                                     />
                                     <button 
                                         onClick={() => {

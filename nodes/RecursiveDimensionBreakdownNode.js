@@ -1,5 +1,9 @@
 const queryBuilder = require('../sql/QueryBuilder');
 const queryExecutor = require('../sql/QueryExecutor');
+const {
+  buildDefaultBreakdownOutputKey,
+  detectOutputKeyMode,
+} = require('../server/constants/workflowOutputKeys');
 
 async function RecursiveDimensionBreakdownNode(def, context) {
   const {
@@ -39,6 +43,13 @@ async function RecursiveDimensionBreakdownNode(def, context) {
   const dimensionList = Array.isArray(dimensions) && dimensions.length
     ? dimensions
     : [dimension];
+  const primaryDimension = dimensionList[0];
+  const resolvedOutputKey = normalizeOutputKey(output_key)
+    || buildDefaultBreakdownOutputKey({
+      baseMetric: base_metric,
+      dimension: primaryDimension,
+      filterMode: filter_mode
+    });
 
   if (!dimensionList[0] || typeof dimensionList[0] !== 'string') {
     return {
@@ -458,20 +469,30 @@ async function RecursiveDimensionBreakdownNode(def, context) {
       }
     : {};
 
-  if (output_key) {
-    outputMetrics[output_key] = formatBaselineList(rankedEvidence, {
-      rankBy: rank_by,
-      baseMetric: base_metric
-    });
+  outputMetrics[resolvedOutputKey] = formatBaselineList(rankedEvidence, {
+    rankBy: rank_by,
+    baseMetric: base_metric,
+    outputKey: resolvedOutputKey,
+    filterMode: filter_mode
+  });
+
+  // Preserve legacy behavior for workflows that still read dimension keys directly.
+  if (!output_key && primaryDimension && primaryDimension !== resolvedOutputKey) {
+    outputMetrics[primaryDimension] = outputMetrics[resolvedOutputKey];
+  }
+
+  const breakdownDelta = {
+    [resolvedOutputKey]: rankedEvidence
+  };
+  if (!output_key && primaryDimension && primaryDimension !== resolvedOutputKey) {
+    breakdownDelta[primaryDimension] = rankedEvidence;
   }
 
   return {
     status: 'pass',
     delta: {
       metrics: outputMetrics,
-      breakdowns: {
-        [output_key || dimensionList[0]]: rankedEvidence
-      }
+      breakdowns: breakdownDelta
     },
     next
   };
@@ -482,22 +503,79 @@ module.exports = RecursiveDimensionBreakdownNode;
 function formatBaselineList(entries, options = {}) {
   if (!Array.isArray(entries) || entries.length === 0) return 'none';
 
-  const { rankBy = 'delta', baseMetric = 'cvr' } = options;
+  const {
+    rankBy = 'delta',
+    baseMetric = 'cvr',
+    outputKey = '',
+    filterMode = 'all'
+  } = options;
+  const mode = detectOutputKeyMode(baseMetric, outputKey);
+  const directionLabel = filterMode === 'drop'
+    ? 'drop'
+    : filterMode === 'increase'
+      ? 'increase'
+      : 'change';
 
   return entries.map((entry, idx) => {
     const label = entry.display_value ?? entry.value;
-    const baselineCvr = formatPct((entry.baseline?.cvr || 0) * 100);
+
+    const baselineCvrValue = entry.baseline?.cvr;
+    const currentCvrValue = entry.current?.cvr;
+    const baselineCvr = baselineCvrValue == null ? 'unknown' : formatPct(baselineCvrValue * 100);
+    const currentCvr = currentCvrValue == null ? 'unknown' : formatPct(currentCvrValue * 100);
+
     const baselineSessions = entry.baseline?.sessions ?? 0;
     const currentSessions = entry.current?.sessions ?? 0;
     const baselineOrders = entry.baseline?.orders ?? 0;
     const currentOrders = entry.current?.orders ?? 0;
+    const baselineAtcSessions = entry.baseline?.atc_sessions ?? 0;
+    const currentAtcSessions = entry.current?.atc_sessions ?? 0;
+    const baselineAtcRateValue = entry.baseline?.atc_rate;
+    const currentAtcRateValue = entry.current?.atc_rate;
+    const baselineAtcRate = baselineAtcRateValue == null ? 'unknown' : formatPct(baselineAtcRateValue * 100);
+    const currentAtcRate = currentAtcRateValue == null ? 'unknown' : formatPct(currentAtcRateValue * 100);
+
+    const cvrDelta = formatPct(entry.deltas?.cvr_delta_pct);
+    const atcRateDelta = formatPct(entry.deltas?.atc_rate_delta_pct);
+    const atcSessionsDelta = formatPct(entry.deltas?.atc_sessions_delta_pct);
     const sessionsDelta = formatPct(entry.deltas?.sessions_delta_pct);
     const ordersDelta = formatPct(entry.deltas?.orders_delta_pct);
 
     const showSessionsOnly = rankBy === 'baseline_sessions' || baseMetric === 'sessions';
     const showOrdersOnly = rankBy === 'baseline_orders' || baseMetric === 'orders';
 
-    const parts = [`${idx + 1}. ${label}`, `baseline CVR ${baselineCvr}`];
+    const parts = [`${idx + 1}. ${label}`];
+
+    if (mode === 'atc_rate') {
+      parts.push(`ATC rate ${baselineAtcRate} -> ${currentAtcRate} (${directionLabel} ${atcRateDelta})`);
+      parts.push(`ATC sessions ${baselineAtcSessions} -> ${currentAtcSessions} (${atcSessionsDelta})`);
+      parts.push(`sessions ${baselineSessions} -> ${currentSessions} (${sessionsDelta})`);
+      return parts.join(' | ');
+    }
+
+    if (mode === 'atc_sessions') {
+      parts.push(`ATC sessions ${baselineAtcSessions} -> ${currentAtcSessions} (${directionLabel} ${atcSessionsDelta})`);
+      parts.push(`ATC rate ${baselineAtcRate} -> ${currentAtcRate} (${atcRateDelta})`);
+      parts.push(`sessions ${baselineSessions} -> ${currentSessions} (${sessionsDelta})`);
+      return parts.join(' | ');
+    }
+
+    if (mode === 'orders') {
+      parts.push(`orders ${baselineOrders} -> ${currentOrders} (${directionLabel} ${ordersDelta})`);
+      parts.push(`sessions ${baselineSessions} -> ${currentSessions} (${sessionsDelta})`);
+      parts.push(`CVR ${baselineCvr} -> ${currentCvr} (${cvrDelta})`);
+      return parts.join(' | ');
+    }
+
+    if (mode === 'sessions') {
+      parts.push(`sessions ${baselineSessions} -> ${currentSessions} (${directionLabel} ${sessionsDelta})`);
+      parts.push(`orders ${baselineOrders} -> ${currentOrders} (${ordersDelta})`);
+      parts.push(`CVR ${baselineCvr} -> ${currentCvr} (${cvrDelta})`);
+      return parts.join(' | ');
+    }
+
+    // Default/cvr mode
+    parts.push(`CVR ${baselineCvr} -> ${currentCvr} (${directionLabel} ${cvrDelta})`);
 
     if (showOrdersOnly) {
       parts.push(`orders ${baselineOrders} -> ${currentOrders} (${ordersDelta})`);
@@ -517,4 +595,9 @@ function formatPct(value) {
     return 'unknown';
   }
   return `${Number(value).toFixed(2)}%`;
+}
+
+function normalizeOutputKey(key) {
+  if (typeof key !== 'string') return '';
+  return key.trim();
 }

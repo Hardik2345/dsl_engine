@@ -129,6 +129,13 @@ function validateWorkflowDefinition(definition) {
           errors.push(`unsupported dimension: ${dim}`);
         }
       }
+
+      if (
+        node.output_key !== undefined &&
+        (typeof node.output_key !== 'string' || node.output_key.trim() === '')
+      ) {
+        errors.push(`recursive_dimension_breakdown node ${node.id} has invalid output_key`);
+      }
     }
 
     if (node.type === 'composite') {
@@ -159,6 +166,12 @@ function validateWorkflowDefinition(definition) {
     if (node.type === 'insight') {
       if (!node.template || (typeof node.template !== 'object' && typeof node.template !== 'string')) {
         errors.push(`insight node ${node.id} must include template`);
+      }
+      if (
+        node.output_key !== undefined &&
+        (typeof node.output_key !== 'string' || node.output_key.trim() === '')
+      ) {
+        errors.push(`insight node ${node.id} has invalid output_key`);
       }
     }
   }

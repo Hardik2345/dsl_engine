@@ -1,5 +1,14 @@
+const {
+  computeEvidenceScore,
+  buildTopEvidenceTokens,
+  formatPct,
+  formatDisplayValue,
+  formatDimensionLabel,
+  makeEvidenceKey,
+} = require('../server/lib/insightUtils');
+
 function InsightNode(def, context) {
-  const { template = {}, persist } = def;
+  const { template = {}, persist, output_key } = def;
   const { metrics = {}, breakdowns = {} } = context;
 
   // Handle simple string templates
@@ -9,34 +18,21 @@ function InsightNode(def, context) {
 
   // --- Find top contributing breakdowns (global) ---
   const flatEvidence = [];
-  Object.values(breakdowns).forEach(list => {
-    list.forEach(entry => {
+  if (output_key && Array.isArray(breakdowns[output_key])) {
+    breakdowns[output_key].forEach(entry => {
       flatEvidence.push(entry);
     });
-  });
-
-  const computeScore = (entry) => {
-    const metric = entry.base_metric || 'cvr';
-
-    if (metric === 'orders') {
-      const pct = entry.deltas?.orders_delta_pct;
-      const share = entry.orderShare ?? entry.sessionShare ?? 0;
-      return pct == null ? -Infinity : Math.abs(pct) * share;
-    }
-
-    if (metric === 'sessions') {
-      const pct = entry.deltas?.sessions_delta_pct;
-      return pct == null ? -Infinity : Math.abs(pct);
-    }
-
-    // default cvr
-    const pct = entry.deltas?.cvr_delta_pct;
-    const share = entry.sessionShare ?? 0;
-    return pct == null ? -Infinity : Math.abs(pct) * share;
-  };
+  } else {
+    Object.values(breakdowns).forEach(list => {
+      if (!Array.isArray(list)) return;
+      list.forEach(entry => {
+        flatEvidence.push(entry);
+      });
+    });
+  }
 
   const scored = flatEvidence
-    .map(entry => ({ entry, score: computeScore(entry) }))
+    .map(entry => ({ entry, score: computeEvidenceScore(entry) }))
     .sort((a, b) => b.score - a.score);
 
   const productCandidates = scored
@@ -67,49 +63,16 @@ function InsightNode(def, context) {
 
   const matchedBreakdown = context?.scratch?.matched_breakdown || null;
   const topEvidence = matchedBreakdown || selected[0] || null;
+  const topEvidenceTokens = buildTopEvidenceTokens(selected);
 
   // --- Build template context ---
   const templateContext = {
     ...metrics,
+    output_key: output_key || '',
     dimension: topEvidence?.dimension,
     dimension_label: formatDimensionLabel(topEvidence?.dimension),
     value: formatDisplayValue(topEvidence),
-    top1_dimension: selected[0]?.dimension,
-    top1_dimension_label: formatDimensionLabel(selected[0]?.dimension),
-    top1_value: formatDisplayValue(selected[0]),
-    top1_cvr_delta_pct_fmt: formatPct(selected[0]?.deltas?.cvr_delta_pct),
-    top1_atc_rate_delta_pct_fmt: formatPct(selected[0]?.deltas?.atc_rate_delta_pct),
-    top1_sessions_delta_pct: selected[0]?.deltas?.sessions_delta_pct,
-    top1_sessions_delta_pct_fmt: formatPct(selected[0]?.deltas?.sessions_delta_pct),
-    top1_orders_delta_pct: selected[0]?.deltas?.orders_delta_pct,
-    top1_orders_delta_pct_fmt: formatPct(selected[0]?.deltas?.orders_delta_pct),
-    top2_dimension: selected[1]?.dimension,
-    top2_dimension_label: formatDimensionLabel(selected[1]?.dimension),
-    top2_value: formatDisplayValue(selected[1]),
-    top2_cvr_delta_pct_fmt: formatPct(selected[1]?.deltas?.cvr_delta_pct),
-    top2_atc_rate_delta_pct_fmt: formatPct(selected[1]?.deltas?.atc_rate_delta_pct),
-    top2_sessions_delta_pct: selected[1]?.deltas?.sessions_delta_pct,
-    top2_sessions_delta_pct_fmt: formatPct(selected[1]?.deltas?.sessions_delta_pct),
-    top2_orders_delta_pct: selected[1]?.deltas?.orders_delta_pct,
-    top2_orders_delta_pct_fmt: formatPct(selected[1]?.deltas?.orders_delta_pct),
-    top3_dimension: selected[2]?.dimension,
-    top3_dimension_label: formatDimensionLabel(selected[2]?.dimension),
-    top3_value: formatDisplayValue(selected[2]),
-    top3_cvr_delta_pct_fmt: formatPct(selected[2]?.deltas?.cvr_delta_pct),
-    top3_atc_rate_delta_pct_fmt: formatPct(selected[2]?.deltas?.atc_rate_delta_pct),
-    top3_sessions_delta_pct: selected[2]?.deltas?.sessions_delta_pct,
-    top3_sessions_delta_pct_fmt: formatPct(selected[2]?.deltas?.sessions_delta_pct),
-    top3_orders_delta_pct: selected[2]?.deltas?.orders_delta_pct,
-    top3_orders_delta_pct_fmt: formatPct(selected[2]?.deltas?.orders_delta_pct),
-    top4_dimension: selected[3]?.dimension,
-    top4_dimension_label: formatDimensionLabel(selected[3]?.dimension),
-    top4_value: formatDisplayValue(selected[3]),
-    top4_cvr_delta_pct_fmt: formatPct(selected[3]?.deltas?.cvr_delta_pct),
-    top4_atc_rate_delta_pct_fmt: formatPct(selected[3]?.deltas?.atc_rate_delta_pct),
-    top4_sessions_delta_pct: selected[3]?.deltas?.sessions_delta_pct,
-    top4_sessions_delta_pct_fmt: formatPct(selected[3]?.deltas?.sessions_delta_pct),
-    top4_orders_delta_pct: selected[3]?.deltas?.orders_delta_pct,
-    top4_orders_delta_pct_fmt: formatPct(selected[3]?.deltas?.orders_delta_pct),
+    ...topEvidenceTokens,
     confidence_score: computeConfidence(metrics, topEvidence),
     cvr_delta_pct_fmt: formatPct(metrics.cvr_delta_pct),
     sessions_delta_pct_fmt: formatPct(metrics.sessions_delta_pct),
@@ -192,29 +155,4 @@ function computeConfidence(metrics, evidence) {
 
   // Simple bounded heuristic (0.3 → 0.9)
   return Number((0.3 + 0.6 * impact * trafficWeight).toFixed(2));
-}
-
-function formatPct(value) {
-  if (value === undefined || value === null || Number.isNaN(Number(value))) {
-    return 'unknown';
-  }
-  return `${Number(value).toFixed(2)}%`;
-}
-
-function formatDisplayValue(entry) {
-  if (!entry) return undefined;
-  return entry.display_value ?? entry.value;
-}
-
-function formatDimensionLabel(dimension) {
-  if (!dimension) return undefined;
-  if (dimension === 'product_id') return 'Product';
-  return dimension;
-}
-
-function makeEvidenceKey(entry) {
-  if (!entry) return 'unknown';
-  const dimension = entry.dimension || 'unknown_dimension';
-  const value = entry.value ?? entry.display_value ?? 'unknown_value';
-  return `${dimension}::${String(value)}`;
 }

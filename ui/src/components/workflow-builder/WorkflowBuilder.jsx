@@ -7,6 +7,10 @@ import NodeSidebar from './NodeSidebar';
 import WorkflowCanvas from './WorkflowCanvas';
 import PropertiesPanel from './PropertiesPanel';
 import { jsonToGraph, graphToJson } from '../../utils/workflowTransformers';
+import {
+  OUTPUT_KEY_SUGGESTIONS,
+  buildDefaultBreakdownOutputKey,
+} from '../../constants/workflowOutputKeys';
 
 const sanitizeIdSegment = (value) =>
   String(value || '')
@@ -49,6 +53,40 @@ function WorkflowBuilderContent({
     () => new Map((workflowImportOptions || []).map((item) => [item.workflowId, item])),
     [workflowImportOptions]
   );
+  const breakdownOutputKeySuggestions = useMemo(() => {
+    const keys = new Set(OUTPUT_KEY_SUGGESTIONS);
+
+    nodes.forEach((node) => {
+      const nodeType = node?.data?.type || node?.type;
+      if (nodeType !== 'recursive_dimension_breakdown') return;
+
+      const explicitOutputKey = typeof node?.data?.output_key === 'string'
+        ? node.data.output_key.trim()
+        : '';
+      if (explicitOutputKey) {
+        keys.add(explicitOutputKey);
+      }
+
+      const dimensions = Array.isArray(node?.data?.dimensions)
+        ? node.data.dimensions
+        : (node?.data?.dimension ? [node.data.dimension] : []);
+      const firstDimension = typeof dimensions[0] === 'string' ? dimensions[0].trim() : '';
+      if (!firstDimension) return;
+
+      keys.add(
+        buildDefaultBreakdownOutputKey({
+          baseMetric: node?.data?.base_metric,
+          dimension: firstDimension,
+          filterMode: node?.data?.filter_mode || 'drop',
+        })
+      );
+
+      // Backward compatibility: older workflows may still reference plain dimension keys.
+      keys.add(firstDimension);
+    });
+
+    return Array.from(keys).sort();
+  }, [nodes]);
 
   // Initialize graph from JSON on mount
   useEffect(() => {
@@ -437,6 +475,7 @@ function WorkflowBuilderContent({
             workflowImportOptions={workflowImportOptions}
             onAttachWorkflowToRule={handleAttachWorkflowToBranchRule}
             isAttachingWorkflow={isAttachingWorkflowRef}
+            breakdownOutputKeySuggestions={breakdownOutputKeySuggestions}
           />
         )}
       </div>
