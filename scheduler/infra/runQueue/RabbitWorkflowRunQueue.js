@@ -45,6 +45,9 @@ class RabbitWorkflowRunQueue {
     await this.channel.assertQueue(this.options.queue, { durable: true });
     await this.channel.bindQueue(this.options.queue, this.options.exchange, this.options.routingKey);
     await this.channel.prefetch(this.options.prefetch);
+    console.log(
+      `[rabbit-run-queue] connected exchange=${this.options.exchange} queue=${this.options.queue} routingKey=${this.options.routingKey} prefetch=${this.options.prefetch}`
+    );
   }
 
   async publishRun(runId, headers = {}) {

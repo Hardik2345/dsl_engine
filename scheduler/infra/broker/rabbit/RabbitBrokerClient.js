@@ -42,6 +42,9 @@ class RabbitBrokerClient extends BrokerClient {
     await this._channel.assertExchange(this.options.exchange, 'topic', { durable: true });
     await this._channel.assertQueue(this.options.queue, { durable: true });
     await this._channel.prefetch(this.options.prefetch);
+    console.log(
+      `[rabbit-subscriber] connected exchange=${this.options.exchange} queue=${this.options.queue} prefetch=${this.options.prefetch}`
+    );
 
     return { connected: true };
   }
@@ -62,6 +65,9 @@ class RabbitBrokerClient extends BrokerClient {
     for (const binding of bindings) {
       await this._channel.bindQueue(this.options.queue, this.options.exchange, binding);
     }
+    console.log(
+      `[rabbit-subscriber] subscribed queue=${this.options.queue} bindings=${bindings.join(',') || '(none)'}`
+    );
 
     const consumeResult = await this._channel.consume(this.options.queue, async (msg) => {
       if (!msg) return;
