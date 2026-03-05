@@ -4,11 +4,21 @@ const UnmatchedAlert = require('../models/UnmatchedAlert');
 const { ingestEventTrigger } = require('../../scheduler/app/schedulerService');
 
 const router = express.Router({ mergeParams: true });
+const DEBUG_ALERT_EVENTS = String(process.env.DEBUG_ALERT_EVENTS || '').toLowerCase() === 'true';
 
 router.post('/events', async (req, res, next) => {
   try {
     const { tenantId } = req.params;
     const { alertType, idempotencyKey } = req.body || {};
+    if (DEBUG_ALERT_EVENTS) {
+      console.log('[alert-events] received-http', {
+        tenantId,
+        alertType: req.body?.alertType || null,
+        idempotencyKey: req.body?.idempotencyKey || null,
+        brand: req.body?.brand || null,
+        occurredAt: req.body?.occurredAt || null
+      });
+    }
 
     if (!alertType) {
       return res.status(400).json({ error: 'alertType is required' });
@@ -21,11 +31,15 @@ router.post('/events', async (req, res, next) => {
     const result = await ingestEventTrigger({ tenantId, body: req.body || {} });
 
     if (result.duplicate) {
+      const matchedWorkflowIds = result.triggerEvent.matchedWorkflowIds || (result.triggerEvent.matchedWorkflowId ? [result.triggerEvent.matchedWorkflowId] : []);
+      const enqueuedRunIds = result.triggerEvent.runIds || (result.triggerEvent.runId ? [result.triggerEvent.runId] : []);
       return res.status(200).json({
         accepted: true,
         duplicate: true,
         matchedWorkflowId: result.triggerEvent.matchedWorkflowId || null,
+        matchedWorkflowIds,
         enqueuedRunId: result.triggerEvent.runId || null,
+        enqueuedRunIds,
         reason: 'duplicate_idempotency_key'
       });
     }
@@ -45,7 +59,9 @@ router.post('/events', async (req, res, next) => {
         accepted: true,
         duplicate: false,
         matchedWorkflowId: result.triggerEvent.matchedWorkflowId || null,
+        matchedWorkflowIds: result.triggerEvent.matchedWorkflowIds || [],
         enqueuedRunId: null,
+        enqueuedRunIds: [],
         reason: result.triggerEvent.reason || 'queue_policy_skipped'
       });
     }
@@ -54,7 +70,11 @@ router.post('/events', async (req, res, next) => {
       accepted: true,
       duplicate: false,
       matchedWorkflowId: result.triggerEvent.matchedWorkflowId,
+      matchedWorkflowIds: result.triggerEvent.matchedWorkflowIds || (result.triggerEvent.matchedWorkflowId ? [result.triggerEvent.matchedWorkflowId] : []),
       enqueuedRunId: result.run?._id || null,
+      enqueuedRunIds: result.triggerEvent.runIds || (result.run?._id ? [result.run._id] : []),
+      enqueuedCount: result.enqueuedCount || ((result.triggerEvent.runIds || []).length || (result.run?._id ? 1 : 0)),
+      skippedCount: result.skippedCount || 0,
       reason: null
     });
   } catch (error) {

@@ -365,13 +365,7 @@ async function RecursiveDimensionBreakdownNode(def, context) {
       depth,
       dimension: activeDimension,
       topK: top_k,
-      selectedCount: topCandidates.length,
-      selectedPreview: topCandidates.slice(0, 3).map((e) => ({
-        value: e.display_value ?? e.value,
-        sessionsDeltaPct: e.deltas?.sessions_delta_pct,
-        cvrDeltaPct: e.deltas?.cvr_delta_pct,
-        atcRateDeltaPct: e.deltas?.atc_rate_delta_pct
-      }))
+      selectedCount: topCandidates.length
     });
 
     // ---------- Phase 3: store evidence + recurse ----------
@@ -440,12 +434,7 @@ async function RecursiveDimensionBreakdownNode(def, context) {
   debugLog('final evidence summary', {
     mergedEvidenceCount: mergedEvidence.length,
     rankedEvidenceCount: rankedEvidence.length,
-    topEvidence: topEvidence ? {
-      dimension: topEvidence.dimension,
-      value: topEvidence.display_value ?? topEvidence.value,
-      sessionsDeltaPct: topEvidence.deltas?.sessions_delta_pct,
-      cvrDeltaPct: topEvidence.deltas?.cvr_delta_pct
-    } : null
+    hasTopEvidence: Boolean(topEvidence)
   });
 
   const outputMetrics = topEvidence

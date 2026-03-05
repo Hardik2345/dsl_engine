@@ -9,8 +9,11 @@ const TriggerEventSchema = new mongoose.Schema(
     occurredAt: { type: Date, required: true },
     payload: { type: Object, default: {} },
     matchedWorkflowId: { type: String },
+    matchedWorkflowIds: { type: [String], default: [] },
     matchedVersion: { type: String },
+    matchedVersions: { type: [String], default: [] },
     runId: { type: mongoose.Schema.Types.ObjectId },
+    runIds: { type: [mongoose.Schema.Types.ObjectId], default: [] },
     status: {
       type: String,
       enum: ['accepted', 'matched', 'enqueued', 'duplicate', 'unmatched', 'failed'],

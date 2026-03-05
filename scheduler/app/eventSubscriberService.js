@@ -7,6 +7,33 @@ const CONFIG_EVENT_TYPES = new Set([
   'alert.config.updated',
   'alert.config.deleted'
 ]);
+const DEBUG_ALERT_EVENTS = String(process.env.DEBUG_ALERT_EVENTS || '').toLowerCase() === 'true';
+
+function summarizeEnvelope(envelope = {}) {
+  const payload = envelope.payload || {};
+  return {
+    eventId: envelope.eventId,
+    eventType: envelope.eventType,
+    tenantId: envelope.tenantId,
+    brandId: envelope.brandId,
+    alertId: envelope.alertId,
+    idempotencyKey: envelope.idempotencyKey,
+    occurredAt: envelope.occurredAt,
+    source: envelope.source,
+    alertType: payload.alertType || null,
+    scope: payload.scope || null,
+    status: payload.status || null
+  };
+}
+
+function logEvent(message, envelope, extra = null) {
+  if (!DEBUG_ALERT_EVENTS) return;
+  if (extra) {
+    console.log(`[alert-events] ${message}`, { ...summarizeEnvelope(envelope), ...extra });
+    return;
+  }
+  console.log(`[alert-events] ${message}`, summarizeEnvelope(envelope));
+}
 
 function validateEnvelope(envelope) {
   const required = [
@@ -56,10 +83,12 @@ async function claimProcessedEvent(envelope) {
 }
 
 async function processEnvelope(envelope) {
+  logEvent('received', envelope);
   validateEnvelope(envelope);
 
   const claimed = await claimProcessedEvent(envelope);
   if (claimed.duplicate) {
+    logEvent('duplicate', envelope, { status: claimed.record?.status || 'duplicate' });
     return {
       duplicate: true,
       status: 'duplicate',
@@ -85,6 +114,7 @@ async function processEnvelope(envelope) {
     record.status = outcome.status || 'applied';
     record.sideEffects = outcome.sideEffects || {};
     await record.save();
+    logEvent('processed', envelope, { status: record.status });
 
     return {
       duplicate: false,
@@ -97,6 +127,7 @@ async function processEnvelope(envelope) {
     record.errorCode = error.code || 'PROCESSING_ERROR';
     record.errorMessage = error.message;
     await record.save();
+    logEvent('failed', envelope, { errorCode: record.errorCode, errorMessage: record.errorMessage });
     throw error;
   }
 }

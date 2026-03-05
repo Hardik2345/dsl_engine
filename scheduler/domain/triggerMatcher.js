@@ -41,6 +41,34 @@ function selectWorkflowMatch(candidates, tenantId, alertType) {
   return target[0];
 }
 
+function selectWorkflowMatches(candidates, tenantId, alertType) {
+  const eligible = candidates.filter(({ definition }) => {
+    const trigger = extractTrigger(definition);
+    if (!trigger || trigger.alertType !== alertType) return false;
+    return matchesBrandScope(trigger, tenantId);
+  });
+
+  if (!eligible.length) return [];
+
+  // Current alert integration is brand-scoped ("single"/"multiple").
+  // Keep global triggers out of fan-out execution for these events.
+  const brandScoped = eligible.filter(({ definition }) => {
+    const scope = definition?.trigger?.brandScope;
+    return scope === 'single' || scope === 'multiple';
+  });
+
+  const target = brandScoped.length ? brandScoped : eligible;
+
+  target.sort((a, b) => {
+    const aAt = new Date(a.workflow.updatedAt || 0).getTime();
+    const bAt = new Date(b.workflow.updatedAt || 0).getTime();
+    return bAt - aAt;
+  });
+
+  return target;
+}
+
 module.exports = {
-  selectWorkflowMatch
+  selectWorkflowMatch,
+  selectWorkflowMatches
 };

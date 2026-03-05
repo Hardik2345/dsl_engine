@@ -4,7 +4,7 @@ const WorkflowSchedule = require('../../server/models/WorkflowSchedule');
 const TriggerEvent = require('../../server/models/TriggerEvent');
 const UnmatchedAlert = require('../../server/models/UnmatchedAlert');
 const MissedTrigger = require('../../server/models/MissedTrigger');
-const { selectWorkflowMatch } = require('../domain/triggerMatcher');
+const { selectWorkflowMatches } = require('../domain/triggerMatcher');
 const { getNextRunAt, listMissedRuns } = require('./cronUtils');
 const { enqueueRun } = require('./runQueueService');
 const { resolveWorkflowVersion } = require('../../server/services/workflowExecutionService');
@@ -137,9 +137,9 @@ async function ingestEventTrigger({ tenantId, body }) {
   }
 
   const candidates = await getWorkflowCandidates(tenantId, true);
-  const match = selectWorkflowMatch(candidates, brand, alertType);
+  const matches = selectWorkflowMatches(candidates, brand, alertType);
 
-  if (!match) {
+  if (!matches.length) {
     await UnmatchedAlert.create({
       tenantId,
       brand,
@@ -157,45 +157,82 @@ async function ingestEventTrigger({ tenantId, body }) {
     return { duplicate: false, triggerEvent, run: null, unmatched: true };
   }
 
-  const workflowId = match.workflow.workflowId;
-  const { workflowVersion, versionId } = await resolveWorkflowVersion({
-    tenantId,
-    workflowId,
-    version: match.workflow.latestVersion
-  });
-
   const context = buildDefaultContext(tenantId, {
     ...body.payload,
     occurredAt: triggerEvent.occurredAt
   });
 
-  const queued = await enqueueRun({
-    tenantId,
-    workflowId,
-    version: versionId,
-    context,
-    definitionJson: workflowVersion.definitionJson,
-    triggerType: 'event',
-    triggerRef: triggerEvent._id,
-    overlapPolicy: 'queue_one_pending',
-    maxAttempts: 3
-  });
+  const enqueued = [];
+  const skipped = [];
 
-  if (!queued.enqueued) {
+  for (const match of matches) {
+    const workflowId = match.workflow.workflowId;
+    const { workflowVersion, versionId } = await resolveWorkflowVersion({
+      tenantId,
+      workflowId,
+      version: match.workflow.latestVersion
+    });
+
+    const queued = await enqueueRun({
+      tenantId,
+      workflowId,
+      version: versionId,
+      context,
+      definitionJson: workflowVersion.definitionJson,
+      triggerType: 'event',
+      triggerRef: triggerEvent._id,
+      overlapPolicy: 'queue_one_pending',
+      maxAttempts: 3
+    });
+
+    if (!queued.enqueued) {
+      skipped.push({ workflowId, reason: queued.reason || 'not_enqueued' });
+      continue;
+    }
+
+    enqueued.push({
+      workflowId,
+      versionId,
+      runId: queued.run._id
+    });
+  }
+
+  if (!enqueued.length) {
     triggerEvent.status = 'failed';
-    triggerEvent.reason = queued.reason;
+    triggerEvent.reason = skipped[0]?.reason || 'no_runs_enqueued';
     await triggerEvent.save();
 
-    return { duplicate: false, triggerEvent, run: null, unmatched: false, skipped: true };
+    return {
+      duplicate: false,
+      triggerEvent,
+      run: null,
+      runs: [],
+      unmatched: false,
+      skipped: true
+    };
   }
 
   triggerEvent.status = 'enqueued';
-  triggerEvent.matchedWorkflowId = workflowId;
-  triggerEvent.matchedVersion = versionId;
-  triggerEvent.runId = queued.run._id;
+  triggerEvent.matchedWorkflowId = enqueued[0].workflowId;
+  triggerEvent.matchedVersion = enqueued[0].versionId;
+  triggerEvent.runId = enqueued[0].runId;
+  triggerEvent.matchedWorkflowIds = enqueued.map(item => item.workflowId);
+  triggerEvent.matchedVersions = enqueued.map(item => item.versionId);
+  triggerEvent.runIds = enqueued.map(item => item.runId);
+  if (skipped.length) {
+    triggerEvent.reason = `partially_enqueued:${skipped.length}`;
+  }
   await triggerEvent.save();
 
-  return { duplicate: false, triggerEvent, run: queued.run, unmatched: false };
+  return {
+    duplicate: false,
+    triggerEvent,
+    run: { _id: enqueued[0].runId },
+    runs: enqueued.map(item => ({ _id: item.runId, workflowId: item.workflowId, version: item.versionId })),
+    unmatched: false,
+    enqueuedCount: enqueued.length,
+    skippedCount: skipped.length
+  };
 }
 
 async function createSchedule({ tenantId, workflowId, payload }) {

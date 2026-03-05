@@ -62,7 +62,9 @@ async function handleAlertFiredEvent(envelope) {
     status: 'applied',
     sideEffects: {
       runId: result.run?._id || null,
-      matchedWorkflowId: result.triggerEvent?.matchedWorkflowId || null
+      runIds: result.triggerEvent?.runIds || (result.run?._id ? [result.run._id] : []),
+      matchedWorkflowId: result.triggerEvent?.matchedWorkflowId || null,
+      matchedWorkflowIds: result.triggerEvent?.matchedWorkflowIds || (result.triggerEvent?.matchedWorkflowId ? [result.triggerEvent.matchedWorkflowId] : [])
     }
   };
 }
