@@ -16,8 +16,24 @@ const alertsIngestRoutes = require('./server/routes/alertsIngest');
 const app = express();
 
 // CORS configuration for UI
+const allowedOrigins = (process.env.UI_ORIGIN || 'http://localhost:5173')
+  .split(',')
+  .map(origin => origin.trim())
+  .filter(Boolean);
+
 app.use(cors({
-  origin: process.env.UI_ORIGIN || 'http://localhost:5173',
+  origin(origin, callback) {
+    // Allow non-browser or same-origin requests without an Origin header.
+    if (!origin) {
+      return callback(null, true);
+    }
+
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error('Not allowed by CORS'));
+  },
   credentials: true
 }));
 
