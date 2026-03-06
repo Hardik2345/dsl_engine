@@ -11,6 +11,7 @@ const tenantRoutes = require('./server/routes/tenants');
 const scheduleRoutes = require('./server/routes/schedules');
 const triggerRoutes = require('./server/routes/triggers');
 const schedulerRoutes = require('./server/routes/scheduler');
+const alertsIngestRoutes = require('./server/routes/alertsIngest');
 
 const app = express();
 
@@ -43,6 +44,7 @@ app.use('/tenants/:tenantId/workflows', scheduleRoutes);
 app.use('/tenants/:tenantId/insights', insightRoutes);
 app.use('/tenants/:tenantId/triggers', triggerRoutes);
 app.use('/tenants/:tenantId/scheduler', schedulerRoutes);
+app.use('/tenants', alertsIngestRoutes);
 
 app.use((err, req, res, next) => {
   const status = err.status || 500;
