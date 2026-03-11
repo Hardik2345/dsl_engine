@@ -1,5 +1,16 @@
 const express = require('express');
 const Tenant = require('../models/Tenant');
+const WorkflowSchedule = require('../models/WorkflowSchedule');
+const { getNextRunAt } = require('../../scheduler/app/cronUtils');
+
+function isSupportedTimeZone(timeZone) {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone }).format(new Date());
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 const router = express.Router();
 
@@ -46,11 +57,16 @@ router.post('/', async (req, res, next) => {
       return res.status(409).json({ error: 'Tenant already exists' });
     }
 
+    const resolvedSettings = settings || {};
+    if (resolvedSettings.timezone && !isSupportedTimeZone(resolvedSettings.timezone)) {
+      return res.status(400).json({ error: 'timezone must be a supported IANA timezone' });
+    }
+
     const tenant = await Tenant.create({
       tenantId: tenantId.toUpperCase(),
       name,
       description,
-      settings: settings || {}
+      settings: resolvedSettings
     });
 
     res.status(201).json({ tenant });
@@ -73,9 +89,24 @@ router.patch('/:tenantId', async (req, res, next) => {
     if (name !== undefined) tenant.name = name;
     if (description !== undefined) tenant.description = description;
     if (isActive !== undefined) tenant.isActive = isActive;
-    if (settings !== undefined) tenant.settings = { ...tenant.settings, ...settings };
+    if (settings !== undefined) {
+      if (settings.timezone && !isSupportedTimeZone(settings.timezone)) {
+        return res.status(400).json({ error: 'timezone must be a supported IANA timezone' });
+      }
+      tenant.settings = { ...tenant.settings, ...settings };
+    }
 
     await tenant.save();
+
+    if (settings?.timezone) {
+      const schedules = await WorkflowSchedule.find({ tenantId });
+      await Promise.all(schedules.map(async (schedule) => {
+        schedule.timezone = settings.timezone;
+        schedule.nextRunAt = getNextRunAt(schedule.cronExpr, new Date(), settings.timezone);
+        await schedule.save();
+      }));
+    }
+
     res.json({ tenant });
   } catch (err) {
     next(err);

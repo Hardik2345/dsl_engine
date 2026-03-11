@@ -7,6 +7,16 @@ const {
   SCHEDULE_WINDOW_MODES,
   SCHEDULE_WINDOW_MODE_VALUES
 } = require('../../scheduler/app/scheduleWindowModes');
+const Tenant = require('../models/Tenant');
+
+function isSupportedTimeZone(timeZone) {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone }).format(new Date());
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 const router = express.Router({ mergeParams: true });
 
@@ -19,8 +29,14 @@ router.post('/:workflowId/schedules', async (req, res, next) => {
       return res.status(400).json({ error: 'cronExpr is required' });
     }
 
-    if (timezone && timezone !== 'UTC') {
-      return res.status(400).json({ error: 'timezone must be UTC for MVP' });
+    let resolvedTimeZone = timezone;
+    if (!resolvedTimeZone) {
+      const tenant = await Tenant.findOne({ tenantId }).lean();
+      resolvedTimeZone = tenant?.settings?.timezone || 'UTC';
+    }
+
+    if (!isSupportedTimeZone(resolvedTimeZone)) {
+      return res.status(400).json({ error: 'timezone must be a supported IANA timezone' });
     }
 
     if (!SCHEDULE_WINDOW_MODE_VALUES.includes(windowMode)) {
@@ -37,7 +53,10 @@ router.post('/:workflowId/schedules', async (req, res, next) => {
     const schedule = await createSchedule({
       tenantId,
       workflowId,
-      payload: req.body || {}
+      payload: {
+        ...(req.body || {}),
+        timezone: resolvedTimeZone
+      }
     });
 
     res.status(201).json({ schedule });
@@ -64,7 +83,7 @@ router.patch('/:workflowId/schedules/:scheduleId', async (req, res, next) => {
     const { tenantId, workflowId, scheduleId } = req.params;
 
     const updates = {};
-    ['name', 'cronExpr', 'overlapPolicy', 'retryPolicy', 'isActive', 'windowMode'].forEach((field) => {
+    ['name', 'cronExpr', 'overlapPolicy', 'retryPolicy', 'isActive', 'windowMode', 'timezone'].forEach((field) => {
       if (req.body[field] !== undefined) updates[field] = req.body[field];
     });
 
@@ -75,15 +94,16 @@ router.patch('/:workflowId/schedules/:scheduleId', async (req, res, next) => {
       return res.status(400).json({ error: `windowMode must be one of ${SCHEDULE_WINDOW_MODE_VALUES.join(', ')}` });
     }
 
-    const effectiveCronExpr = updates.cronExpr || req.body.cronExpr;
-    const nextWindowMode = updates.windowMode || undefined;
-    const targetWindowMode = nextWindowMode;
-
     const current = await WorkflowSchedule.findOne({ _id: scheduleId, tenantId, workflowId }).lean();
     if (!current) return res.status(404).json({ error: 'schedule not found' });
 
-    const resolvedWindowMode = targetWindowMode || current.windowMode || SCHEDULE_WINDOW_MODES.PREVIOUS_COMPLETE_DAY;
-    const resolvedCronExpr = effectiveCronExpr || current.cronExpr;
+    if (updates.timezone !== undefined && !isSupportedTimeZone(updates.timezone)) {
+      return res.status(400).json({ error: 'timezone must be a supported IANA timezone' });
+    }
+
+    const resolvedWindowMode = updates.windowMode || current.windowMode || SCHEDULE_WINDOW_MODES.PREVIOUS_COMPLETE_DAY;
+    const resolvedCronExpr = updates.cronExpr || current.cronExpr;
+    const resolvedTimeZone = updates.timezone || current.timezone || 'UTC';
 
     if (
       resolvedWindowMode === SCHEDULE_WINDOW_MODES.DAY_TO_DATE_VS_PREVIOUS_DAY
@@ -92,8 +112,8 @@ router.patch('/:workflowId/schedules/:scheduleId', async (req, res, next) => {
       return res.status(400).json({ error: 'day_to_date_vs_previous_day requires a top-of-hour cron expression (minute must be 0)' });
     }
 
-    if (updates.cronExpr) {
-      updates.nextRunAt = getNextRunAt(updates.cronExpr, new Date());
+    if (updates.cronExpr || updates.timezone) {
+      updates.nextRunAt = getNextRunAt(resolvedCronExpr, new Date(), resolvedTimeZone);
     }
 
     const schedule = await WorkflowSchedule.findOneAndUpdate(
@@ -135,7 +155,7 @@ router.post('/:workflowId/schedules/:scheduleId/resume', async (req, res, next) 
       {
         $set: {
           isActive: true,
-          nextRunAt: getNextRunAt(current.cronExpr, new Date())
+          nextRunAt: getNextRunAt(current.cronExpr, new Date(), current.timezone || 'UTC')
         },
         $unset: { pausedAt: 1 }
       },

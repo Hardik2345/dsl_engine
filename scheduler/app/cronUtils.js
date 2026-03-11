@@ -1,3 +1,75 @@
+function getFormatter(timeZone) {
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    weekday: 'short'
+  });
+}
+
+function getTimeZoneParts(date, timeZone = 'UTC') {
+  const formatter = getFormatter(timeZone);
+  const parts = formatter.formatToParts(date);
+  const map = {};
+  parts.forEach((part) => {
+    if (part.type !== 'literal') map[part.type] = part.value;
+  });
+
+  const weekdayMap = {
+    Sun: 0,
+    Mon: 1,
+    Tue: 2,
+    Wed: 3,
+    Thu: 4,
+    Fri: 5,
+    Sat: 6
+  };
+
+  return {
+    year: Number(map.year),
+    month: Number(map.month),
+    day: Number(map.day),
+    hour: Number(map.hour),
+    minute: Number(map.minute),
+    second: Number(map.second),
+    weekday: weekdayMap[map.weekday]
+  };
+}
+
+function localDateTimeToUtc({
+  year,
+  month,
+  day,
+  hour = 0,
+  minute = 0,
+  second = 0
+}, timeZone = 'UTC') {
+  let guess = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+
+  for (let i = 0; i < 4; i += 1) {
+    const parts = getTimeZoneParts(guess, timeZone);
+    const desiredUtcMs = Date.UTC(year, month - 1, day, hour, minute, second);
+    const actualUtcMs = Date.UTC(
+      parts.year,
+      parts.month - 1,
+      parts.day,
+      parts.hour,
+      parts.minute,
+      parts.second
+    );
+    const diffMs = desiredUtcMs - actualUtcMs;
+    if (diffMs === 0) return guess;
+    guess = new Date(guess.getTime() + diffMs);
+  }
+
+  return guess;
+}
+
 function parsePart(part, min, max) {
   const values = new Set();
   const chunks = String(part).split(',');
@@ -58,15 +130,16 @@ function isTopOfHourCronExpr(expr) {
   return cron.minute.size === 1 && cron.minute.has(0);
 }
 
-function matchesCronDate(cron, date) {
-  return cron.minute.has(date.getUTCMinutes())
-    && cron.hour.has(date.getUTCHours())
-    && cron.day.has(date.getUTCDate())
-    && cron.month.has(date.getUTCMonth() + 1)
-    && cron.weekday.has(date.getUTCDay());
+function matchesCronDate(cron, date, timeZone = 'UTC') {
+  const parts = getTimeZoneParts(date, timeZone);
+  return cron.minute.has(parts.minute)
+    && cron.hour.has(parts.hour)
+    && cron.day.has(parts.day)
+    && cron.month.has(parts.month)
+    && cron.weekday.has(parts.weekday);
 }
 
-function getNextRunAt(expr, fromDate) {
+function getNextRunAt(expr, fromDate, timeZone = 'UTC') {
   const cron = parseCronExpr(expr);
   const cursor = new Date(fromDate);
   cursor.setUTCSeconds(0, 0);
@@ -74,7 +147,7 @@ function getNextRunAt(expr, fromDate) {
 
   const limit = 60 * 24 * 366;
   for (let i = 0; i < limit; i += 1) {
-    if (matchesCronDate(cron, cursor)) {
+    if (matchesCronDate(cron, cursor, timeZone)) {
       return new Date(cursor);
     }
     cursor.setUTCMinutes(cursor.getUTCMinutes() + 1);
@@ -83,7 +156,7 @@ function getNextRunAt(expr, fromDate) {
   throw new Error('unable to compute next run for cron expression');
 }
 
-function listMissedRuns(expr, startExclusive, endInclusive, maxRuns = 500) {
+function listMissedRuns(expr, startExclusive, endInclusive, maxRuns = 500, timeZone = 'UTC') {
   const cron = parseCronExpr(expr);
   const cursor = new Date(startExclusive);
   cursor.setUTCSeconds(0, 0);
@@ -91,7 +164,7 @@ function listMissedRuns(expr, startExclusive, endInclusive, maxRuns = 500) {
 
   const missed = [];
   while (cursor <= endInclusive && missed.length < maxRuns) {
-    if (matchesCronDate(cron, cursor)) {
+    if (matchesCronDate(cron, cursor, timeZone)) {
       missed.push(new Date(cursor));
     }
     cursor.setUTCMinutes(cursor.getUTCMinutes() + 1);
@@ -104,5 +177,7 @@ module.exports = {
   getNextRunAt,
   listMissedRuns,
   parseCronExpr,
-  isTopOfHourCronExpr
+  isTopOfHourCronExpr,
+  getTimeZoneParts,
+  localDateTimeToUtc
 };

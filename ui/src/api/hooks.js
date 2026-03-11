@@ -41,6 +41,19 @@ export function useDeleteTenant() {
   });
 }
 
+export function useUpdateTenant() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ tenantId, updates }) => tenantApi.update(tenantId, updates),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['tenants'] });
+      queryClient.invalidateQueries({ queryKey: ['workflows', variables.tenantId] });
+      queryClient.invalidateQueries({ queryKey: ['schedules', variables.tenantId] });
+    },
+  });
+}
+
 // ============ Workflow Hooks ============
 
 export function useWorkflows() {

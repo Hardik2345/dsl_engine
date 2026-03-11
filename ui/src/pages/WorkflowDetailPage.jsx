@@ -18,6 +18,7 @@ import {
   useWorkflow,
   useWorkflowVersions,
   useDeleteWorkflow,
+  useTenants,
   useWorkflowSchedules,
   useCreateWorkflowSchedule,
   usePauseWorkflowSchedule,
@@ -28,6 +29,7 @@ import {
   useTriggerEvents,
   useUnmatchedAlerts
 } from '../api/hooks';
+import { useTenant } from '../context/TenantContext';
 import { Button, Badge, Card, CardHeader, CardContent, CardTitle, PageSpinner } from '../components/ui';
 import { format } from 'date-fns';
 import { useState } from 'react';
@@ -67,8 +69,10 @@ const SCHEDULE_PRESETS = {
 export default function WorkflowDetailPage() {
   const navigate = useNavigate();
   const { workflowId } = useParams();
+  const { tenantId } = useTenant();
 
   const { data, isLoading, error } = useWorkflow(workflowId);
+  const { data: tenants = [] } = useTenants();
   const { data: versions } = useWorkflowVersions(workflowId);
   const { data: schedules = [], isLoading: schedulesLoading } = useWorkflowSchedules(workflowId);
   const { data: queue } = useSchedulerQueue();
@@ -108,10 +112,25 @@ export default function WorkflowDetailPage() {
 
   const { workflow, version } = data || {};
   const definition = version?.definitionJson;
+  const currentTenant = tenants.find((tenant) => tenant.tenantId === tenantId);
+  const schedulerTimeZone = currentTenant?.settings?.timezone || 'UTC';
 
   const isTopOfHourCronExpr = (expr) => {
     const minutePart = String(expr || '').trim().split(/\s+/)[0];
     return minutePart === '0';
+  };
+  const formatScheduleDate = (dateValue, timeZone) => {
+    if (!dateValue) return '-';
+    const date = new Date(dateValue);
+    return new Intl.DateTimeFormat(undefined, {
+      timeZone: timeZone || 'UTC',
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    }).format(date);
   };
 
   const handleDelete = async () => {
@@ -148,7 +167,7 @@ export default function WorkflowDetailPage() {
         name: scheduleForm.name.trim() || undefined,
         cronExpr,
         overlapPolicy: scheduleForm.overlapPolicy,
-        timezone: 'UTC',
+        timezone: schedulerTimeZone,
         windowMode: scheduleForm.windowMode
       });
       toast.success('Schedule created');
@@ -375,7 +394,7 @@ export default function WorkflowDetailPage() {
                       ))}
                     </select>
                     <p className="text-xs text-gray-500 mt-2">
-                      {SCHEDULE_PRESETS[selectedPreset].description} ({SCHEDULE_PRESETS[selectedPreset].cronExpr} UTC)
+                      {SCHEDULE_PRESETS[selectedPreset].description} ({SCHEDULE_PRESETS[selectedPreset].cronExpr} {schedulerTimeZone})
                     </p>
                     {scheduleForm.windowMode === 'day_to_date_vs_previous_day' && selectedPreset !== 'hourly' && (
                       <p className="text-xs text-amber-700 mt-1">
@@ -385,7 +404,7 @@ export default function WorkflowDetailPage() {
                   </div>
                 ) : (
                   <div className="md:col-span-12">
-                    <label className="block text-xs text-gray-500 mb-1">Cron (UTC)</label>
+                    <label className="block text-xs text-gray-500 mb-1">Cron ({schedulerTimeZone})</label>
                     <input
                       type="text"
                       value={customCronExpr}
@@ -396,7 +415,7 @@ export default function WorkflowDetailPage() {
                     />
                     <p className="text-xs text-gray-500 mt-2">
                       Format: minute hour day-of-month month day-of-week.
-                      Example: <span className="font-mono">0 9 * * 1-5</span> runs weekdays at 09:00 UTC.
+                      Example: <span className="font-mono">0 9 * * 1-5</span> runs weekdays at 09:00 {schedulerTimeZone}.
                     </p>
                     {scheduleForm.windowMode === 'day_to_date_vs_previous_day' && (
                       <p className="text-xs text-amber-700 mt-1">
@@ -421,7 +440,7 @@ export default function WorkflowDetailPage() {
                       <div className="flex items-center justify-between gap-2">
                         <div>
                           <p className="font-medium text-gray-900">{schedule.name || 'Untitled Schedule'}</p>
-                          <p className="text-xs text-gray-500 font-mono">{schedule.cronExpr} (UTC)</p>
+                          <p className="text-xs text-gray-500 font-mono">{schedule.cronExpr} ({schedule.timezone || 'UTC'})</p>
                           <p className="text-xs text-gray-500 mt-1">
                             {SCHEDULE_WINDOW_MODES[schedule.windowMode || 'previous_complete_day']?.label || schedule.windowMode}
                           </p>
@@ -433,10 +452,10 @@ export default function WorkflowDetailPage() {
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs text-gray-500 mt-2">
                         <p>
-                          Next Run: {schedule.nextRunAt ? format(new Date(schedule.nextRunAt), 'MMM d, yyyy HH:mm') : '-'}
+                          Next Run: {formatScheduleDate(schedule.nextRunAt, schedule.timezone || 'UTC')}
                         </p>
                         <p>
-                          Last Trigger: {schedule.lastTriggeredAt ? format(new Date(schedule.lastTriggeredAt), 'MMM d, yyyy HH:mm') : '-'}
+                          Last Trigger: {formatScheduleDate(schedule.lastTriggeredAt, schedule.timezone || 'UTC')}
                         </p>
                       </div>
 

@@ -5,7 +5,12 @@ const TriggerEvent = require('../../server/models/TriggerEvent');
 const UnmatchedAlert = require('../../server/models/UnmatchedAlert');
 const MissedTrigger = require('../../server/models/MissedTrigger');
 const { selectWorkflowMatches } = require('../domain/triggerMatcher');
-const { getNextRunAt, listMissedRuns } = require('./cronUtils');
+const {
+  getNextRunAt,
+  listMissedRuns,
+  getTimeZoneParts,
+  localDateTimeToUtc
+} = require('./cronUtils');
 const { enqueueRun } = require('./runQueueService');
 const { resolveWorkflowVersion } = require('../../server/services/workflowExecutionService');
 const { SCHEDULE_WINDOW_MODES } = require('./scheduleWindowModes');
@@ -63,21 +68,38 @@ function toIsoUtc(date) {
   return new Date(date).toISOString();
 }
 
-function startOfUtcDay(dateInput) {
-  const date = new Date(dateInput);
-  return new Date(Date.UTC(
-    date.getUTCFullYear(),
-    date.getUTCMonth(),
-    date.getUTCDate(),
-    0, 0, 0, 0
-  ));
+function startOfDay(dateInput, timeZone = 'UTC') {
+  const parts = getTimeZoneParts(new Date(dateInput), timeZone);
+  return localDateTimeToUtc({
+    year: parts.year,
+    month: parts.month,
+    day: parts.day,
+    hour: 0,
+    minute: 0,
+    second: 0
+  }, timeZone);
 }
 
-function buildPreviousCompleteDayContext(tenantId, triggerTime, payload = {}) {
+function buildPreviousCompleteDayContext(tenantId, triggerTime, payload = {}, timeZone = 'UTC') {
   const triggerDate = new Date(triggerTime);
-  const currentDayStart = startOfUtcDay(triggerDate);
-  const previousDayStart = new Date(currentDayStart.getTime() - 24 * 60 * 60 * 1000);
-  const baselineDayStart = new Date(previousDayStart.getTime() - 24 * 60 * 60 * 1000);
+  const triggerParts = getTimeZoneParts(triggerDate, timeZone);
+  const currentDayStart = startOfDay(triggerDate, timeZone);
+  const previousDayStart = localDateTimeToUtc({
+    year: triggerParts.year,
+    month: triggerParts.month,
+    day: triggerParts.day - 1,
+    hour: 0,
+    minute: 0,
+    second: 0
+  }, timeZone);
+  const baselineDayStart = localDateTimeToUtc({
+    year: triggerParts.year,
+    month: triggerParts.month,
+    day: triggerParts.day - 2,
+    hour: 0,
+    minute: 0,
+    second: 0
+  }, timeZone);
 
   return {
     meta: {
@@ -100,11 +122,26 @@ function buildPreviousCompleteDayContext(tenantId, triggerTime, payload = {}) {
   };
 }
 
-function buildDayToDateVsPreviousDayContext(tenantId, triggerTime, payload = {}) {
+function buildDayToDateVsPreviousDayContext(tenantId, triggerTime, payload = {}, timeZone = 'UTC') {
   const triggerDate = new Date(triggerTime);
-  const currentDayStart = startOfUtcDay(triggerDate);
-  const previousDayStart = new Date(currentDayStart.getTime() - 24 * 60 * 60 * 1000);
-  const previousDayCutoff = new Date(previousDayStart.getTime() + (triggerDate.getTime() - currentDayStart.getTime()));
+  const triggerParts = getTimeZoneParts(triggerDate, timeZone);
+  const currentDayStart = startOfDay(triggerDate, timeZone);
+  const previousDayStart = localDateTimeToUtc({
+    year: triggerParts.year,
+    month: triggerParts.month,
+    day: triggerParts.day - 1,
+    hour: 0,
+    minute: 0,
+    second: 0
+  }, timeZone);
+  const previousDayCutoff = localDateTimeToUtc({
+    year: triggerParts.year,
+    month: triggerParts.month,
+    day: triggerParts.day - 1,
+    hour: triggerParts.hour,
+    minute: triggerParts.minute,
+    second: triggerParts.second
+  }, timeZone);
 
   return {
     meta: {
@@ -129,12 +166,13 @@ function buildDayToDateVsPreviousDayContext(tenantId, triggerTime, payload = {})
 
 function buildCronContext(schedule, triggerTime, payload = {}) {
   const mode = schedule?.windowMode || SCHEDULE_WINDOW_MODES.PREVIOUS_COMPLETE_DAY;
+  const timeZone = schedule?.timezone || 'UTC';
 
   if (mode === SCHEDULE_WINDOW_MODES.DAY_TO_DATE_VS_PREVIOUS_DAY) {
-    return buildDayToDateVsPreviousDayContext(schedule.tenantId, triggerTime, payload);
+    return buildDayToDateVsPreviousDayContext(schedule.tenantId, triggerTime, payload, timeZone);
   }
 
-  return buildPreviousCompleteDayContext(schedule.tenantId, triggerTime, payload);
+  return buildPreviousCompleteDayContext(schedule.tenantId, triggerTime, payload, timeZone);
 }
 
 async function ingestEventTrigger({ tenantId, body }) {
@@ -275,14 +313,14 @@ async function ingestEventTrigger({ tenantId, body }) {
 
 async function createSchedule({ tenantId, workflowId, payload }) {
   const now = new Date();
-  const nextRunAt = getNextRunAt(payload.cronExpr, now);
+  const nextRunAt = getNextRunAt(payload.cronExpr, now, payload.timezone || 'UTC');
 
   return WorkflowSchedule.create({
     tenantId,
     workflowId,
     name: payload.name || `${workflowId}-schedule`,
     cronExpr: payload.cronExpr,
-    timezone: 'UTC',
+    timezone: payload.timezone || 'UTC',
     windowMode: payload.windowMode || SCHEDULE_WINDOW_MODES.PREVIOUS_COMPLETE_DAY,
     isActive: payload.isActive !== false,
     overlapPolicy: payload.overlapPolicy || 'queue_one_pending',
@@ -325,7 +363,7 @@ async function evaluateDueSchedules(now = new Date()) {
       maxAttempts: schedule.retryPolicy?.maxAttempts || 3
     });
 
-    const nextRunAt = getNextRunAt(schedule.cronExpr, now);
+    const nextRunAt = getNextRunAt(schedule.cronExpr, now, schedule.timezone || 'UTC');
     await WorkflowSchedule.updateOne(
       { _id: schedule._id },
       {
@@ -353,7 +391,13 @@ async function recordMissedTriggers(scheduleId, fromTime, toTime) {
   const schedule = await WorkflowSchedule.findById(scheduleId).lean();
   if (!schedule) return [];
 
-  const missedRuns = listMissedRuns(schedule.cronExpr, fromTime, toTime);
+  const missedRuns = listMissedRuns(
+    schedule.cronExpr,
+    fromTime,
+    toTime,
+    500,
+    schedule.timezone || 'UTC'
+  );
   const records = [];
   for (const runAt of missedRuns) {
     try {

@@ -1,16 +1,28 @@
 import { useState } from 'react';
 import { Settings, Save, Trash2, Plus } from 'lucide-react';
 import { useTenant } from '../context/TenantContext';
-import { useTenants, useDeleteTenant } from '../api/hooks';
+import { useTenants, useDeleteTenant, useUpdateTenant } from '../api/hooks';
 import { Card, CardHeader, CardContent, CardTitle, Button, Badge, PageSpinner } from '../components/ui';
 import CreateTenantModal from '../components/CreateTenantModal';
 import toast from 'react-hot-toast';
+
+const TIMEZONE_OPTIONS = [
+  'UTC',
+  'Asia/Kolkata',
+  'America/New_York',
+  'America/Los_Angeles',
+  'Europe/London',
+  'Europe/Paris',
+  'Asia/Tokyo'
+];
 
 export default function SettingsPage() {
   const { tenantId, setTenantId } = useTenant();
   const { data: tenants, isLoading } = useTenants();
   const deleteTenant = useDeleteTenant();
+  const updateTenant = useUpdateTenant();
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [timezoneDrafts, setTimezoneDrafts] = useState({});
 
   const handleDeleteTenant = async (tid) => {
     if (!confirm(`Are you sure you want to deactivate tenant '${tid}'?`)) return;
@@ -28,6 +40,26 @@ export default function SettingsPage() {
   };
 
   if (isLoading) return <PageSpinner />;
+
+  const getDraftTimezone = (tenant) => timezoneDrafts[tenant.tenantId] ?? tenant.settings?.timezone ?? 'UTC';
+
+  const handleSaveTimezone = async (tenant) => {
+    const nextTimezone = getDraftTimezone(tenant);
+    try {
+      await updateTenant.mutateAsync({
+        tenantId: tenant.tenantId,
+        updates: {
+          settings: {
+            ...(tenant.settings || {}),
+            timezone: nextTimezone
+          }
+        }
+      });
+      toast.success(`Timezone updated for '${tenant.tenantId}'`);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to update tenant timezone');
+    }
+  };
 
   return (
     <div>
@@ -82,6 +114,32 @@ export default function SettingsPage() {
                       <div className="flex gap-4 mt-2 text-xs text-gray-500">
                         <span>Currency: {tenant.settings?.currency || 'USD'}</span>
                         <span>Timezone: {tenant.settings?.timezone || 'UTC'}</span>
+                      </div>
+                      <div className="mt-3 flex items-end gap-2">
+                        <div>
+                          <label className="block text-xs text-gray-500 mb-1">Scheduler Timezone</label>
+                          <select
+                            value={getDraftTimezone(tenant)}
+                            onChange={(e) => setTimezoneDrafts((prev) => ({
+                              ...prev,
+                              [tenant.tenantId]: e.target.value
+                            }))}
+                            className="h-9 border border-gray-300 rounded-lg px-3 text-sm bg-white"
+                          >
+                            {TIMEZONE_OPTIONS.map((timeZone) => (
+                              <option key={timeZone} value={timeZone}>{timeZone}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => handleSaveTimezone(tenant)}
+                          loading={updateTenant.isPending}
+                        >
+                          <Save className="w-4 h-4 mr-1" />
+                          Save Timezone
+                        </Button>
                       </div>
                     </div>
                     <div className="flex gap-2">
