@@ -81,6 +81,26 @@ export default function RunDetailPage() {
       </ol>
     );
   };
+  const formatMetricValue = (key, value) => {
+    if (typeof value !== 'number') {
+      return renderRankedList(value) || truncate(String(value), 200);
+    }
+
+    if (
+      key === 'current_cvr'
+      || key === 'baseline_cvr'
+      || key === 'current_atc_rate'
+      || key === 'baseline_atc_rate'
+    ) {
+      return `${(value * 100).toFixed(2)}%`;
+    }
+
+    if (key.endsWith('_delta_pct')) {
+      return `${value.toFixed(2)}%`;
+    }
+
+    return value.toFixed(2);
+  };
   const formatMetaValue = (key, value) => {
     if (value == null) return '';
 
@@ -119,6 +139,12 @@ export default function RunDetailPage() {
   const finalInsight = run?.context?.scratch?.finalInsight
     || run?.nodeOutputs
       ?.map((output) => output?.result?.delta?.scratch?.finalInsight)
+      .filter(Boolean)
+      .at(-1)
+    || null;
+  const finalInsightEmail = run?.context?.scratch?.finalInsightEmail
+    || run?.nodeOutputs
+      ?.map((output) => output?.result?.delta?.scratch?.finalInsightEmail)
       .filter(Boolean)
       .at(-1)
     || null;
@@ -271,9 +297,7 @@ export default function RunDetailPage() {
                     <div key={key} className="flex justify-between gap-4">
                       <dt className="text-sm text-gray-500">{key}</dt>
                       <dd className="font-medium text-sm text-right break-words">
-                        {typeof value === 'number'
-                          ? value.toFixed(2)
-                          : renderRankedList(value) || truncate(String(value), 200)}
+                        {formatMetricValue(key, value)}
                       </dd>
                     </div>
                   ))}
@@ -310,8 +334,8 @@ export default function RunDetailPage() {
                 <CardTitle className="text-primary-800">💡 Insight</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-sm text-primary-900 font-medium mb-3">
-                  {truncate(finalInsight.summary, 220)}
+                <div className="text-sm text-primary-900 font-medium mb-3 whitespace-pre-wrap">
+                  {finalInsight.summary}
                 </div>
                 
                 {finalInsight.details && finalInsight.details.length > 0 && (
@@ -381,6 +405,36 @@ export default function RunDetailPage() {
                     <span className="text-xs font-bold text-primary-800">
                         {(Number(finalInsight.confidence) * 100).toFixed(0)}%
                     </span>
+                  </div>
+                )}
+
+                {finalInsightEmail && (
+                  <div className="pt-3 mt-3 border-t border-primary-200/50 space-y-2">
+                    <div className="flex items-center justify-between gap-4">
+                      <span className="text-xs text-primary-700">Email Delivery</span>
+                      <span className={`text-xs font-semibold ${
+                        finalInsightEmail.status === 'sent'
+                          ? 'text-green-700'
+                          : 'text-red-700'
+                      }`}>
+                        {finalInsightEmail.status}
+                      </span>
+                    </div>
+                    {Array.isArray(finalInsightEmail.to) && finalInsightEmail.to.length > 0 && (
+                      <div className="text-xs text-primary-800 break-all">
+                        To: {finalInsightEmail.to.join(', ')}
+                      </div>
+                    )}
+                    {finalInsightEmail.subject && (
+                      <div className="text-xs text-primary-800 break-words">
+                        Subject: {finalInsightEmail.subject}
+                      </div>
+                    )}
+                    {finalInsightEmail.error && (
+                      <div className="text-xs text-red-700 break-words">
+                        Error: {finalInsightEmail.error}
+                      </div>
+                    )}
                   </div>
                 )}
               </CardContent>

@@ -2,14 +2,20 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { X, Play } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { useExecuteWorkflow } from '../api/hooks';
+import { useExecuteWorkflow, useWorkflow } from '../api/hooks';
 import { useTenant } from '../context/TenantContext';
 import { Button } from './ui';
+import {
+  getPartialDayProductCompatibilityErrors,
+  isPartialDayWindow,
+  validateRunDateRanges
+} from '../utils/workflowValidation';
 
 export default function RunWorkflowModal({ workflow, onClose }) {
   const navigate = useNavigate();
   const { tenantId } = useTenant();
   const executeWorkflow = useExecuteWorkflow(workflow.workflowId);
+  const { data: workflowData } = useWorkflow(workflow.workflowId);
 
   const now = new Date();
   const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
@@ -78,6 +84,24 @@ export default function RunWorkflowModal({ workflow, onClose }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
+    const validationErrors = validateRunDateRanges(formData);
+    if (validationErrors.length) {
+      toast.error(validationErrors[0]);
+      return;
+    }
+
+    const isPartialDayRun = (
+      isPartialDayWindow(formData.windowStart, formData.windowEnd)
+      || isPartialDayWindow(formData.baselineStart, formData.baselineEnd)
+    );
+    if (isPartialDayRun) {
+      const compatibilityErrors = getPartialDayProductCompatibilityErrors(workflowData?.version?.definitionJson);
+      if (compatibilityErrors.length) {
+        toast.error(compatibilityErrors[0]);
+        return;
+      }
+    }
+
     const context = {
       meta: {
         tenantId,
@@ -103,7 +127,10 @@ export default function RunWorkflowModal({ workflow, onClose }) {
       onClose();
       navigate(`/workflows/${workflow.workflowId}/runs/${result.runId}`);
     } catch (err) {
-      toast.error(err.response?.data?.error || 'Failed to run workflow');
+      const errorMessage = err.response?.data?.errors?.[0]
+        || err.response?.data?.error
+        || 'Failed to run workflow';
+      toast.error(errorMessage);
     }
   };
 

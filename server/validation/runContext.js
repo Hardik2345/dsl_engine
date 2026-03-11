@@ -1,3 +1,9 @@
+const {
+  parseSqlDateTime,
+  isHourAligned,
+  hasPositiveDuration,
+} = require('../../lib/timeWindowUtils');
+
 function validateRunContext(context) {
   const errors = [];
 
@@ -16,6 +22,32 @@ function validateRunContext(context) {
     }
     if (baselineWindow?.type) {
       errors.push('context.meta.baselineWindow.type is not allowed');
+    }
+
+    const ranges = [
+      { label: 'window', value: window },
+      { label: 'baselineWindow', value: baselineWindow }
+    ];
+
+    for (const range of ranges) {
+      const start = range.value?.start;
+      const end = range.value?.end;
+      if (!start || !end) continue;
+
+      if (!parseSqlDateTime(start) || !parseSqlDateTime(end)) {
+        errors.push(`context.meta.${range.label}.start/end must be valid SQL datetime strings`);
+        continue;
+      }
+
+      if (!isHourAligned(start) || !isHourAligned(end)) {
+        errors.push(
+          `context.meta.${range.label}.start/end must be aligned to the hour (minutes and seconds must be 00)`
+        );
+      }
+
+      if (!hasPositiveDuration(start, end)) {
+        errors.push(`context.meta.${range.label}.end must be after start`);
+      }
     }
   }
 

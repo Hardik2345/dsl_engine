@@ -21,6 +21,10 @@ const ALLOWED_DIMENSIONS = new Set([
 ]);
 
 const ALLOWED_OPS = new Set(['>', '>=', '<', '<=', '==', '!=']);
+const {
+  getPartialDayProductCompatibilityErrors
+} = require('./productPartialDayCompatibility');
+const { validateRecipients } = require('../services/emailService');
 
 function validateWorkflowDefinition(definition) {
   const errors = [];
@@ -173,8 +177,31 @@ function validateWorkflowDefinition(definition) {
       ) {
         errors.push(`insight node ${node.id} has invalid output_key`);
       }
+      if (node.email !== undefined) {
+        if (!node.email || typeof node.email !== 'object' || Array.isArray(node.email)) {
+          errors.push(`insight node ${node.id} email must be an object`);
+        } else {
+          if (
+            node.email.enabled !== undefined &&
+            typeof node.email.enabled !== 'boolean'
+          ) {
+            errors.push(`insight node ${node.id} email.enabled must be boolean`);
+          }
+          if (node.email.to !== undefined && !Array.isArray(node.email.to)) {
+            errors.push(`insight node ${node.id} email.to must be an array`);
+          }
+          if (node.email.enabled) {
+            const recipientValidation = validateRecipients(node.email.to);
+            if (!recipientValidation.ok) {
+              errors.push(`insight node ${node.id} email config invalid: ${recipientValidation.error}`);
+            }
+          }
+        }
+      }
     }
   }
+
+  errors.push(...getPartialDayProductCompatibilityErrors(definition));
 
   return { ok: errors.length === 0, errors };
 }

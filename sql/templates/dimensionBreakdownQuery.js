@@ -1,5 +1,10 @@
 // sql/templates/dimensionBreakdownQuery.js
 
+const {
+  isFullDayAlignedWindow,
+  listHourlyProductUnsupportedFilters
+} = require('../../lib/timeWindowUtils');
+
 const ALLOWED_DIMENSIONS = new Set([
   "product_id",
   'utm_source',
@@ -51,6 +56,36 @@ function buildNotNullFilter(dimension) {
   return '';
 }
 
+function shouldUseHourlyProductRollup({ dimension, window, baselineWindow }) {
+  if (dimension !== 'product_id') return false;
+  const currentIsFullDay = isFullDayAlignedWindow(window?.start, window?.end);
+  const baselineIsFullDay = isFullDayAlignedWindow(baselineWindow?.start, baselineWindow?.end);
+  return !(currentIsFullDay && baselineIsFullDay);
+}
+
+function buildHourlyProductFilterWhere(filters = []) {
+  const unsupportedDimensions = listHourlyProductUnsupportedFilters(filters);
+  if (unsupportedDimensions.length) {
+    throw new Error(
+      `dimensionBreakdownQuery: hourly product analysis does not support filters on ${Array.from(new Set(unsupportedDimensions)).join(', ')}`
+    );
+  }
+
+  const clauses = [];
+  const params = [];
+
+  for (const f of filters) {
+    if (f?.dimension !== 'product_id' || f.value === undefined) continue;
+    clauses.push('product_id = ?');
+    params.push(f.value);
+  }
+
+  return {
+    whereSql: clauses.length ? ` AND ${clauses.join(' AND ')}` : '',
+    params
+  };
+}
+
 module.exports = function dimensionBreakdownQuery({
   tenantId,
   dimension,
@@ -65,7 +100,10 @@ module.exports = function dimensionBreakdownQuery({
 
   assertSafeDimension(dimension);
 
-  const { whereSql: filterSql, params: filterParams } = buildFilterWhere(filters);
+  const useHourlyProductRollup = shouldUseHourlyProductRollup({ dimension, window, baselineWindow });
+  const { whereSql: filterSql, params: filterParams } = useHourlyProductRollup
+    ? buildHourlyProductFilterWhere(filters)
+    : buildFilterWhere(filters);
   const notNullSql = buildNotNullFilter(dimension);
   const windowStart = normalizeDateTime(window.start);
   const windowEnd = normalizeDateTime(window.end);
@@ -75,7 +113,90 @@ module.exports = function dimensionBreakdownQuery({
   const titleStart = baselineStart;
   const titleEnd = windowEnd;
 
-  const sql = `
+  const sql = useHourlyProductRollup ? `
+WITH
+current_sessions AS (
+  SELECT
+    product_id AS dimension_value,
+    COALESCE(SUM(sessions), 0) AS sessions,
+    COALESCE(SUM(sessions_with_cart_additions), 0) AS atc_sessions
+  FROM hourly_product_performance_rollup
+  WHERE CONCAT(date, ' ', LPAD(hour, 2, '0'), ':00:00') >= ?
+    AND CONCAT(date, ' ', LPAD(hour, 2, '0'), ':00:00') <  ?
+    ${filterSql}
+    ${notNullSql}
+  GROUP BY product_id
+),
+baseline_sessions AS (
+  SELECT
+    product_id AS dimension_value,
+    COALESCE(SUM(sessions), 0) AS sessions,
+    COALESCE(SUM(sessions_with_cart_additions), 0) AS atc_sessions
+  FROM hourly_product_performance_rollup
+  WHERE CONCAT(date, ' ', LPAD(hour, 2, '0'), ':00:00') >= ?
+    AND CONCAT(date, ' ', LPAD(hour, 2, '0'), ':00:00') <  ?
+    ${filterSql}
+    ${notNullSql}
+  GROUP BY product_id
+),${includeOrders ? `
+current_orders AS (
+  SELECT
+    product_id AS dimension_value,
+    COALESCE(SUM(orders), 0) AS orders
+  FROM hourly_product_performance_rollup
+  WHERE CONCAT(date, ' ', LPAD(hour, 2, '0'), ':00:00') >= ?
+    AND CONCAT(date, ' ', LPAD(hour, 2, '0'), ':00:00') <  ?
+    ${filterSql}
+    ${notNullSql}
+  GROUP BY product_id
+),
+baseline_orders AS (
+  SELECT
+    product_id AS dimension_value,
+    COALESCE(SUM(orders), 0) AS orders
+  FROM hourly_product_performance_rollup
+  WHERE CONCAT(date, ' ', LPAD(hour, 2, '0'), ':00:00') >= ?
+    AND CONCAT(date, ' ', LPAD(hour, 2, '0'), ':00:00') <  ?
+    ${filterSql}
+    ${notNullSql}
+  GROUP BY product_id
+),` : ''}
+product_titles AS (
+  SELECT
+    product_id AS dimension_value,
+    MAX(product_title) AS product_title
+  FROM hourly_product_performance_rollup
+  WHERE CONCAT(date, ' ', LPAD(hour, 2, '0'), ':00:00') >= ?
+    AND CONCAT(date, ' ', LPAD(hour, 2, '0'), ':00:00') <  ?
+    ${filterSql}
+    ${notNullSql}
+  GROUP BY product_id
+),
+all_keys AS (
+  SELECT dimension_value FROM current_sessions
+  UNION
+  SELECT dimension_value FROM baseline_sessions
+  ${includeOrders ? `
+  UNION
+  SELECT dimension_value FROM current_orders
+  UNION
+  SELECT dimension_value FROM baseline_orders` : ''}
+)
+SELECT
+  k.dimension_value,
+  COALESCE(cs.sessions, 0) AS current_sessions,
+  COALESCE(bs.sessions, 0) AS baseline_sessions,
+  COALESCE(cs.atc_sessions, 0) AS current_atc_sessions,
+  COALESCE(bs.atc_sessions, 0) AS baseline_atc_sessions,
+  ${includeOrders ? 'COALESCE(co.orders, 0) AS current_orders,\n  COALESCE(bo.orders, 0) AS baseline_orders' : '0 AS current_orders,\n  0 AS baseline_orders'},
+  pt.product_title
+FROM all_keys k
+LEFT JOIN current_sessions cs ON cs.dimension_value = k.dimension_value
+LEFT JOIN baseline_sessions bs ON bs.dimension_value = k.dimension_value
+${includeOrders ? 'LEFT JOIN current_orders co ON co.dimension_value = k.dimension_value\nLEFT JOIN baseline_orders bo ON bo.dimension_value = k.dimension_value' : ''}
+LEFT JOIN product_titles pt ON pt.dimension_value = k.dimension_value
+ORDER BY current_sessions DESC;
+  ` : `
 WITH
 current_sessions AS (
   SELECT
@@ -161,7 +282,24 @@ ${includeProductTitle ? 'LEFT JOIN product_titles pt ON pt.dimension_value = k.d
 ORDER BY current_sessions DESC;
   `;
 
-  const params = [
+  const params = useHourlyProductRollup ? [
+    windowStart, windowEnd,
+    ...filterParams,
+
+    baselineStart, baselineEnd,
+    ...filterParams,
+
+    ...(includeOrders ? [
+      windowStart, windowEnd,
+      ...filterParams,
+
+      baselineStart, baselineEnd,
+      ...filterParams
+    ] : []),
+
+    titleStart, titleEnd,
+    ...filterParams
+  ] : [
     windowStart, windowEnd,
     ...filterParams,
 

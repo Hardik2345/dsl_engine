@@ -11,6 +11,9 @@ import {
   OUTPUT_KEY_SUGGESTIONS,
   buildDefaultBreakdownOutputKey,
 } from '../../constants/workflowOutputKeys';
+import {
+  getPartialDayProductCompatibilityErrors,
+} from '../../utils/workflowValidation';
 
 const sanitizeIdSegment = (value) =>
   String(value || '')
@@ -305,6 +308,11 @@ function WorkflowBuilderContent({
   const handleSave = async () => {
     try {
       const workflowJson = graphToJson(nodes, edges, metadata);
+      const compatibilityErrors = getPartialDayProductCompatibilityErrors(workflowJson);
+      if (compatibilityErrors.length) {
+        toast.error(compatibilityErrors[0]);
+        return;
+      }
       // Validate or cleanup
       await onSave(workflowJson);
     } catch (error) {

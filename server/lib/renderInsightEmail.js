@@ -1,0 +1,176 @@
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function escapeHtmlPreserveBreaks(value) {
+  return escapeHtml(value).replace(/\n/g, '<br />');
+}
+
+function renderDetailCard(detail, index) {
+  const lines = String(detail || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const title = lines[0] || '';
+  const metricLines = lines.slice(1);
+  const metricRows = metricLines
+    .map((line) => {
+      const separatorIndex = line.indexOf(':');
+      if (separatorIndex === -1) {
+        return null;
+      }
+      const label = line.slice(0, separatorIndex).trim();
+      const value = line.slice(separatorIndex + 1).trim();
+      if (!label || !value) return null;
+      return { label, value };
+    })
+    .filter(Boolean);
+  const looseLines = metricLines.filter((line) => !line.includes(':'));
+
+  return `
+    <div style="margin-bottom:12px;padding:18px 20px;border:1px solid #d9e1ec;border-radius:16px;background:#f8fafc;">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse:collapse;">
+        <tr>
+          <td valign="top" style="width:40px;padding-right:14px;">
+            <div style="width:32px;height:32px;border-radius:999px;background:#dbeafe;color:#1d4ed8;font-size:14px;font-weight:800;line-height:32px;text-align:center;font-variant-numeric:tabular-nums;">
+              ${index + 1}
+            </div>
+          </td>
+          <td valign="top">
+            <div style="font-size:19px;line-height:1.35;font-weight:650;color:#0f172a;letter-spacing:-0.01em;">${escapeHtml(title)}</div>
+            ${metricRows.length ? `
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-top:12px;border-collapse:collapse;">
+                ${metricRows.map((row) => `
+                  <tr>
+                    <td valign="top" style="padding:0 14px 8px 0;font-size:12px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:#64748b;white-space:nowrap;">
+                      ${escapeHtml(row.label)}
+                    </td>
+                    <td valign="top" style="padding:0 0 8px 0;font-size:18px;font-weight:700;line-height:1.2;color:#111827;font-variant-numeric:tabular-nums;white-space:nowrap;">
+                      ${escapeHtml(row.value)}
+                    </td>
+                  </tr>
+                `).join('')}
+              </table>
+            ` : ''}
+            ${looseLines.length ? `
+              <div style="margin-top:${metricRows.length ? '4px' : '12px'};font-size:14px;line-height:1.6;color:#334155;white-space:pre-wrap;">
+                ${escapeHtmlPreserveBreaks(looseLines.join('\n'))}
+              </div>
+            ` : ''}
+          </td>
+        </tr>
+      </table>
+    </div>
+  `;
+}
+
+function renderInsightEmail({ insight, workflowId, nodeId }) {
+  const summary = insight?.summary || 'Insight generated';
+  const details = Array.isArray(insight?.details)
+    ? insight.details.filter((detail) => detail !== undefined && detail !== null && String(detail).trim() !== '')
+    : [];
+  const confidence = insight?.confidence;
+  const confidencePct = confidence == null || Number.isNaN(Number(confidence))
+    ? null
+    : `${Math.round(Number(confidence) * 100)}%`;
+
+  const subject = `DSL Insight: ${summary}`.slice(0, 200);
+
+  const detailsHtml = details.length
+    ? `
+      <div style="margin-top:28px;">
+        <div style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#6b7280;margin-bottom:12px;">At a Glance</div>
+        ${details.map((detail, index) => renderDetailCard(detail, index)).join('')}
+      </div>
+    `
+    : '';
+
+  const confidenceHtml = confidencePct
+    ? `
+      <div style="display:inline-block;padding:0;border-radius:16px;background:#ecfdf5;border:1px solid #a7f3d0;overflow:hidden;">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">
+          <tr>
+            <td style="padding:11px 14px 10px 16px;font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#047857;white-space:nowrap;border-right:1px solid rgba(16, 185, 129, 0.18);">
+              Confidence
+            </td>
+            <td style="padding:9px 16px 9px 14px;font-size:16px;font-weight:800;line-height:1;color:#065f46;font-variant-numeric:tabular-nums;white-space:nowrap;">
+              ${escapeHtml(confidencePct)}
+            </td>
+          </tr>
+        </table>
+      </div>
+    `
+    : '';
+
+  const html = `
+<!doctype html>
+<html>
+  <head>
+    <meta name="color-scheme" content="light only">
+    <meta name="supported-color-schemes" content="light only">
+  </head>
+  <body style="margin:0;padding:28px;background:#eef2f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#111827;">
+    <div style="max-width:720px;margin:0 auto;background:#ffffff;border:1px solid #dbe3ee;border-radius:22px;overflow:hidden;box-shadow:0 10px 30px rgba(15, 23, 42, 0.08);">
+      <div style="padding:24px 28px;background-color:#0f172a;background-image:linear-gradient(135deg, #0f172a 0%, #1e293b 100%);color:#ffffff !important;-webkit-text-fill-color:#ffffff;">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse:collapse;">
+          <tr>
+            <td valign="top">
+            <div style="font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#cbd5e1 !important;-webkit-text-fill-color:#cbd5e1;">DSL Engine Insight</div>
+            <div style="margin-top:10px;font-size:15px;line-height:1.5;color:#f8fafc !important;-webkit-text-fill-color:#f8fafc;">
+              ${escapeHtml(workflowId || 'workflow')}<span style="opacity:0.55;"> / </span>${escapeHtml(nodeId || 'insight')}
+            </div>
+            </td>
+            <td valign="top" align="right" style="width:1%;white-space:nowrap;">
+              <div style="display:inline-block;padding:8px 14px;border-radius:999px;background-color:#334155;color:#ffffff !important;-webkit-text-fill-color:#ffffff;font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;">
+                Alert Summary
+              </div>
+            </td>
+          </tr>
+        </table>
+      </div>
+      <div style="padding:28px;">
+        <div style="padding:22px 24px;border-radius:18px;background-color:#0f172a;background-image:linear-gradient(135deg, #0f172a 0%, #172554 100%);border:1px solid #1e3a8a;box-shadow:inset 0 1px 0 rgba(255,255,255,0.04);color:#f8fafc !important;-webkit-text-fill-color:#f8fafc;">
+          <div style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#bfdbfe !important;-webkit-text-fill-color:#bfdbfe;margin-bottom:10px;">Key Takeaway</div>
+          <div style="font-size:24px;line-height:1.3;font-weight:750;color:#f8fafc !important;-webkit-text-fill-color:#f8fafc;white-space:pre-wrap;letter-spacing:-0.02em;text-shadow:0 1px 1px rgba(0,0,0,0.12);">${escapeHtml(summary)}</div>
+        </div>
+        <div style="margin-top:18px;">
+          ${confidenceHtml}
+        </div>
+        ${detailsHtml}
+        <div style="margin-top:28px;padding-top:16px;border-top:1px solid #e5e7eb;font-size:12px;line-height:1.6;color:#64748b;">
+          This message was generated automatically by DSL Engine to help you identify the issue quickly.
+        </div>
+      </div>
+    </div>
+  </body>
+</html>`;
+
+  const textLines = [
+    'DSL Engine Insight',
+    workflowId ? `Workflow: ${workflowId}` : null,
+    nodeId ? `Node: ${nodeId}` : null,
+    '',
+    `Summary: ${summary}`,
+    details.length ? '' : null,
+    details.length ? 'Details:' : null,
+    ...details.map((detail, index) => `${index + 1}. ${detail}`),
+    confidencePct ? '' : null,
+    confidencePct ? `Confidence: ${confidencePct}` : null,
+  ].filter(Boolean);
+
+  return {
+    subject,
+    html,
+    text: textLines.join('\n')
+  };
+}
+
+module.exports = {
+  renderInsightEmail,
+};

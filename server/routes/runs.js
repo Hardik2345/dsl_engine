@@ -1,6 +1,9 @@
 const express = require('express');
 const WorkflowRun = require('../models/WorkflowRun');
 const { validateRunContext } = require('../validation/runContext');
+const {
+  validateRunContextAgainstWorkflow
+} = require('../validation/productPartialDayCompatibility');
 const { resolveWorkflowVersion, executeRun } = require('../services/workflowExecutionService');
 const { enqueueRun } = require('../../scheduler/app/runQueueService');
 
@@ -23,6 +26,11 @@ router.post('/:workflowId/runs', async (req, res, next) => {
       workflowId,
       version
     });
+
+    const compatibility = validateRunContextAgainstWorkflow(context, workflowVersion.definitionJson);
+    if (!compatibility.ok) {
+      return res.status(400).json({ errors: compatibility.errors });
+    }
 
     if (mode === 'async') {
       const queued = await enqueueRun({

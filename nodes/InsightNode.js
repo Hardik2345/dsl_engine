@@ -6,9 +6,11 @@ const {
   formatDimensionLabel,
   makeEvidenceKey,
 } = require('../server/lib/insightUtils');
+const { renderInsightEmail } = require('../server/lib/renderInsightEmail');
+const { sendEmail } = require('../server/services/emailService');
 
-function InsightNode(def, context) {
-  const { template = {}, persist, output_key } = def;
+async function InsightNode(def, context) {
+  const { template = {}, persist, output_key, email } = def;
   const { metrics = {}, breakdowns = {} } = context;
 
   // Handle simple string templates
@@ -107,21 +109,40 @@ function InsightNode(def, context) {
     confidence: templateContext.confidence_score
   };
 
-  // --- Persist (optional) ---
+  let emailResult = null;
+  if (email?.enabled) {
+    const renderedEmail = renderInsightEmail({
+      insight,
+      workflowId: context?.workflow_id || context?.meta?.workflowId,
+      nodeId: def.id
+    });
+
+    emailResult = await sendEmail({
+      to: email.to,
+      subject: renderedEmail.subject,
+      html: renderedEmail.html,
+      text: renderedEmail.text
+    });
+  }
+
+  const scratchDelta = {
+    finalInsight: insight
+  };
   if (persist) {
-    // implement db persistance here
-    context.scratch = {
-      ...(context.scratch || {}),
-      persistedInsight: insight
+    // implement db persistence here
+    scratchDelta.persistedInsight = insight;
+  }
+  if (emailResult) {
+    scratchDelta.finalInsightEmail = {
+      nodeId: def.id,
+      ...emailResult
     };
   }
 
   return {
     status: 'pass',
     delta: {
-      scratch: {
-        finalInsight: insight
-      }
+      scratch: scratchDelta
     },
     next: def.next
   };

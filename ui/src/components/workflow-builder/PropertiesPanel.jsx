@@ -3,6 +3,7 @@ import { X, Plus, Trash2 } from 'lucide-react';
 import SuggestionInput from '../SuggestionInput';
 import { INSIGHT_BASE_TOKENS } from '../../constants/insightTokens';
 import { OUTPUT_KEY_SUGGESTIONS } from '../../constants/workflowOutputKeys';
+import { getNodePartialDayProductWarnings } from '../../utils/workflowValidation';
 
 // Generate unique ID for rules
 const generateRuleId = () => `rule_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
@@ -354,6 +355,18 @@ function buildValidationCondition(scope, op, value) {
   return `${scope} ${op} ${value}`;
 }
 
+function formatEmailRecipients(value) {
+  if (!Array.isArray(value) || !value.length) return '';
+  return value.join(', ');
+}
+
+function parseEmailRecipients(value) {
+  return String(value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 export default function PropertiesPanel({
   selectedNode,
   onChange,
@@ -366,6 +379,10 @@ export default function PropertiesPanel({
 }) {
   const [data, setData] = useState(selectedNode?.data || {});
   const [ruleWorkflowSelections, setRuleWorkflowSelections] = useState({});
+  const partialDayProductWarnings = useMemo(
+    () => getNodePartialDayProductWarnings(data),
+    [data]
+  );
 
   useEffect(() => {
     setData(selectedNode?.data || {});
@@ -938,6 +955,11 @@ export default function PropertiesPanel({
                      </div>
                  ) : (
                     <>
+                     {partialDayProductWarnings.length > 0 && (
+                        <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                          {partialDayProductWarnings[0]}
+                        </div>
+                     )}
                         <div>
                             <label className="block text-xs font-medium text-gray-500 mb-1">Base Metric</label>
                             <select
@@ -1215,6 +1237,43 @@ export default function PropertiesPanel({
                          </div>
                      </div>
                  )}
+
+                 <div className="pt-3 border-t border-gray-100 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-medium text-gray-500">Email Insight</label>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(data.email?.enabled)}
+                        onChange={(e) =>
+                          handleChange('email', {
+                            ...(data.email || {}),
+                            enabled: e.target.checked,
+                            to: Array.isArray(data.email?.to) ? data.email.to : []
+                          })
+                        }
+                        className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Recipients</label>
+                      <input
+                        type="text"
+                        value={formatEmailRecipients(data.email?.to)}
+                        onChange={(e) =>
+                          handleChange('email', {
+                            ...(data.email || {}),
+                            enabled: Boolean(data.email?.enabled),
+                            to: parseEmailRecipients(e.target.value)
+                          })
+                        }
+                        placeholder="ops@example.com, owner@example.com"
+                        className="w-full border p-2 rounded text-sm"
+                      />
+                      <div className="text-[10px] text-gray-400 mt-1">
+                        The HTML email layout is fixed. Only recipients are configurable here.
+                      </div>
+                    </div>
+                 </div>
              </div>
           );
 
