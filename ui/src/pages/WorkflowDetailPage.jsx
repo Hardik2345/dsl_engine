@@ -35,6 +35,17 @@ import RunWorkflowModal from '../components/RunWorkflowModal';
 import EditWorkflowModal from '../components/EditWorkflowModal';
 import toast from 'react-hot-toast';
 
+const SCHEDULE_WINDOW_MODES = {
+  previous_complete_day: {
+    label: 'Previous Complete Day',
+    description: 'Current window is the previous full UTC day; baseline is the day before that.'
+  },
+  day_to_date_vs_previous_day: {
+    label: 'Today Until Scheduled Time vs Yesterday',
+    description: 'Current window is 00:00 to the scheduled run time; baseline is yesterday 00:00 to the same hour.'
+  }
+};
+
 const SCHEDULE_PRESETS = {
   every_5m: {
     label: 'Every 5 minutes',
@@ -75,7 +86,8 @@ export default function WorkflowDetailPage() {
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [scheduleForm, setScheduleForm] = useState({
     name: '',
-    overlapPolicy: 'queue_one_pending'
+    overlapPolicy: 'queue_one_pending',
+    windowMode: 'previous_complete_day'
   });
   const [scheduleMode, setScheduleMode] = useState('simple');
   const [selectedPreset, setSelectedPreset] = useState('every_15m');
@@ -96,6 +108,11 @@ export default function WorkflowDetailPage() {
 
   const { workflow, version } = data || {};
   const definition = version?.definitionJson;
+
+  const isTopOfHourCronExpr = (expr) => {
+    const minutePart = String(expr || '').trim().split(/\s+/)[0];
+    return minutePart === '0';
+  };
 
   const handleDelete = async () => {
     if (!confirm(`Are you sure you want to delete workflow "${workflowId}"? This action cannot be undone.`)) {
@@ -119,11 +136,20 @@ export default function WorkflowDetailPage() {
         ? SCHEDULE_PRESETS[selectedPreset].cronExpr
         : customCronExpr.trim();
 
+      if (
+        scheduleForm.windowMode === 'day_to_date_vs_previous_day'
+        && !isTopOfHourCronExpr(cronExpr)
+      ) {
+        toast.error('This window mode requires a top-of-hour cron expression. The minute field must be 0.');
+        return;
+      }
+
       await createSchedule.mutateAsync({
         name: scheduleForm.name.trim() || undefined,
         cronExpr,
         overlapPolicy: scheduleForm.overlapPolicy,
-        timezone: 'UTC'
+        timezone: 'UTC',
+        windowMode: scheduleForm.windowMode
       });
       toast.success('Schedule created');
       setScheduleForm((prev) => ({ ...prev, name: '' }));
@@ -309,6 +335,21 @@ export default function WorkflowDetailPage() {
                     <option value="allow_parallel">Allow parallel</option>
                   </select>
                 </div>
+                <div className="md:col-span-12">
+                  <label className="block text-xs text-gray-500 mb-1">Window Mode</label>
+                  <select
+                    value={scheduleForm.windowMode}
+                    onChange={(e) => setScheduleForm((prev) => ({ ...prev, windowMode: e.target.value }))}
+                    className="w-full h-12 border border-gray-300 rounded-lg px-3 text-sm"
+                  >
+                    {Object.entries(SCHEDULE_WINDOW_MODES).map(([key, item]) => (
+                      <option key={key} value={key}>{item.label}</option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-gray-500 mt-2">
+                    {SCHEDULE_WINDOW_MODES[scheduleForm.windowMode].description}
+                  </p>
+                </div>
                 <div className="md:col-span-2 flex items-end">
                   <Button
                     type="submit"
@@ -336,6 +377,11 @@ export default function WorkflowDetailPage() {
                     <p className="text-xs text-gray-500 mt-2">
                       {SCHEDULE_PRESETS[selectedPreset].description} ({SCHEDULE_PRESETS[selectedPreset].cronExpr} UTC)
                     </p>
+                    {scheduleForm.windowMode === 'day_to_date_vs_previous_day' && selectedPreset !== 'hourly' && (
+                      <p className="text-xs text-amber-700 mt-1">
+                        This window mode only works with top-of-hour schedules. Use `Hourly` or switch to advanced cron with minute `0`.
+                      </p>
+                    )}
                   </div>
                 ) : (
                   <div className="md:col-span-12">
@@ -352,6 +398,11 @@ export default function WorkflowDetailPage() {
                       Format: minute hour day-of-month month day-of-week.
                       Example: <span className="font-mono">0 9 * * 1-5</span> runs weekdays at 09:00 UTC.
                     </p>
+                    {scheduleForm.windowMode === 'day_to_date_vs_previous_day' && (
+                      <p className="text-xs text-amber-700 mt-1">
+                        For this window mode, the minute field must be `0` so the run aligns to hourly data buckets.
+                      </p>
+                    )}
                   </div>
                 )}
               </form>
@@ -371,6 +422,9 @@ export default function WorkflowDetailPage() {
                         <div>
                           <p className="font-medium text-gray-900">{schedule.name || 'Untitled Schedule'}</p>
                           <p className="text-xs text-gray-500 font-mono">{schedule.cronExpr} (UTC)</p>
+                          <p className="text-xs text-gray-500 mt-1">
+                            {SCHEDULE_WINDOW_MODES[schedule.windowMode || 'previous_complete_day']?.label || schedule.windowMode}
+                          </p>
                         </div>
                         <Badge status={schedule.isActive ? 'active' : 'inactive'}>
                           {schedule.isActive ? 'Active' : 'Paused'}

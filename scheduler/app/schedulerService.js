@@ -8,6 +8,7 @@ const { selectWorkflowMatches } = require('../domain/triggerMatcher');
 const { getNextRunAt, listMissedRuns } = require('./cronUtils');
 const { enqueueRun } = require('./runQueueService');
 const { resolveWorkflowVersion } = require('../../server/services/workflowExecutionService');
+const { SCHEDULE_WINDOW_MODES } = require('./scheduleWindowModes');
 
 async function getWorkflowCandidates(tenantId, includeGlobal = true) {
   const clauses = [{ tenantId, isActive: true }];
@@ -97,6 +98,43 @@ function buildPreviousCompleteDayContext(tenantId, triggerTime, payload = {}) {
     rootCausePath: [],
     scratch: {}
   };
+}
+
+function buildDayToDateVsPreviousDayContext(tenantId, triggerTime, payload = {}) {
+  const triggerDate = new Date(triggerTime);
+  const currentDayStart = startOfUtcDay(triggerDate);
+  const previousDayStart = new Date(currentDayStart.getTime() - 24 * 60 * 60 * 1000);
+  const previousDayCutoff = new Date(previousDayStart.getTime() + (triggerDate.getTime() - currentDayStart.getTime()));
+
+  return {
+    meta: {
+      tenantId,
+      metric: payload?.metric || 'cvr',
+      triggeredAt: toIsoUtc(triggerDate),
+      window: {
+        start: toIsoUtc(currentDayStart),
+        end: toIsoUtc(triggerDate)
+      },
+      baselineWindow: {
+        start: toIsoUtc(previousDayStart),
+        end: toIsoUtc(previousDayCutoff)
+      }
+    },
+    filters: payload?.filters || [],
+    metrics: payload?.metrics || {},
+    rootCausePath: [],
+    scratch: {}
+  };
+}
+
+function buildCronContext(schedule, triggerTime, payload = {}) {
+  const mode = schedule?.windowMode || SCHEDULE_WINDOW_MODES.PREVIOUS_COMPLETE_DAY;
+
+  if (mode === SCHEDULE_WINDOW_MODES.DAY_TO_DATE_VS_PREVIOUS_DAY) {
+    return buildDayToDateVsPreviousDayContext(schedule.tenantId, triggerTime, payload);
+  }
+
+  return buildPreviousCompleteDayContext(schedule.tenantId, triggerTime, payload);
 }
 
 async function ingestEventTrigger({ tenantId, body }) {
@@ -245,6 +283,7 @@ async function createSchedule({ tenantId, workflowId, payload }) {
     name: payload.name || `${workflowId}-schedule`,
     cronExpr: payload.cronExpr,
     timezone: 'UTC',
+    windowMode: payload.windowMode || SCHEDULE_WINDOW_MODES.PREVIOUS_COMPLETE_DAY,
     isActive: payload.isActive !== false,
     overlapPolicy: payload.overlapPolicy || 'queue_one_pending',
     retryPolicy: payload.retryPolicy || { maxAttempts: 3, backoffSeconds: [30, 120, 600] },
@@ -269,7 +308,8 @@ async function evaluateDueSchedules(now = new Date()) {
       version: null
     });
 
-    const context = buildPreviousCompleteDayContext(schedule.tenantId, now, {
+    const scheduledRunTime = schedule.nextRunAt || now;
+    const context = buildCronContext(schedule, scheduledRunTime, {
       metric: 'cvr'
     });
 
@@ -354,7 +394,7 @@ async function replayMissedTriggers(scheduleId) {
       version: null
     });
 
-    const context = buildPreviousCompleteDayContext(schedule.tenantId, missed.intendedRunAt, {
+    const context = buildCronContext(schedule, missed.intendedRunAt, {
       metric: 'cvr'
     });
 

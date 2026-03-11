@@ -53,6 +53,11 @@ function parseCronExpr(expr) {
   };
 }
 
+function isTopOfHourCronExpr(expr) {
+  const cron = parseCronExpr(expr);
+  return cron.minute.size === 1 && cron.minute.has(0);
+}
+
 function matchesCronDate(cron, date) {
   return cron.minute.has(date.getUTCMinutes())
     && cron.hour.has(date.getUTCHours())
@@ -97,5 +102,7 @@ function listMissedRuns(expr, startExclusive, endInclusive, maxRuns = 500) {
 
 module.exports = {
   getNextRunAt,
-  listMissedRuns
+  listMissedRuns,
+  parseCronExpr,
+  isTopOfHourCronExpr
 };

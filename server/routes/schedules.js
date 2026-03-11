@@ -2,14 +2,18 @@ const express = require('express');
 const WorkflowSchedule = require('../models/WorkflowSchedule');
 const MissedTrigger = require('../models/MissedTrigger');
 const { createSchedule, replayMissedTriggers } = require('../../scheduler/app/schedulerService');
-const { getNextRunAt } = require('../../scheduler/app/cronUtils');
+const { getNextRunAt, isTopOfHourCronExpr } = require('../../scheduler/app/cronUtils');
+const {
+  SCHEDULE_WINDOW_MODES,
+  SCHEDULE_WINDOW_MODE_VALUES
+} = require('../../scheduler/app/scheduleWindowModes');
 
 const router = express.Router({ mergeParams: true });
 
 router.post('/:workflowId/schedules', async (req, res, next) => {
   try {
     const { tenantId, workflowId } = req.params;
-    const { cronExpr, timezone } = req.body || {};
+    const { cronExpr, timezone, windowMode = SCHEDULE_WINDOW_MODES.PREVIOUS_COMPLETE_DAY } = req.body || {};
 
     if (!cronExpr) {
       return res.status(400).json({ error: 'cronExpr is required' });
@@ -17,6 +21,17 @@ router.post('/:workflowId/schedules', async (req, res, next) => {
 
     if (timezone && timezone !== 'UTC') {
       return res.status(400).json({ error: 'timezone must be UTC for MVP' });
+    }
+
+    if (!SCHEDULE_WINDOW_MODE_VALUES.includes(windowMode)) {
+      return res.status(400).json({ error: `windowMode must be one of ${SCHEDULE_WINDOW_MODE_VALUES.join(', ')}` });
+    }
+
+    if (
+      windowMode === SCHEDULE_WINDOW_MODES.DAY_TO_DATE_VS_PREVIOUS_DAY
+      && !isTopOfHourCronExpr(cronExpr)
+    ) {
+      return res.status(400).json({ error: 'day_to_date_vs_previous_day requires a top-of-hour cron expression (minute must be 0)' });
     }
 
     const schedule = await createSchedule({
@@ -49,9 +64,33 @@ router.patch('/:workflowId/schedules/:scheduleId', async (req, res, next) => {
     const { tenantId, workflowId, scheduleId } = req.params;
 
     const updates = {};
-    ['name', 'cronExpr', 'overlapPolicy', 'retryPolicy', 'isActive'].forEach((field) => {
+    ['name', 'cronExpr', 'overlapPolicy', 'retryPolicy', 'isActive', 'windowMode'].forEach((field) => {
       if (req.body[field] !== undefined) updates[field] = req.body[field];
     });
+
+    if (
+      updates.windowMode !== undefined
+      && !SCHEDULE_WINDOW_MODE_VALUES.includes(updates.windowMode)
+    ) {
+      return res.status(400).json({ error: `windowMode must be one of ${SCHEDULE_WINDOW_MODE_VALUES.join(', ')}` });
+    }
+
+    const effectiveCronExpr = updates.cronExpr || req.body.cronExpr;
+    const nextWindowMode = updates.windowMode || undefined;
+    const targetWindowMode = nextWindowMode;
+
+    const current = await WorkflowSchedule.findOne({ _id: scheduleId, tenantId, workflowId }).lean();
+    if (!current) return res.status(404).json({ error: 'schedule not found' });
+
+    const resolvedWindowMode = targetWindowMode || current.windowMode || SCHEDULE_WINDOW_MODES.PREVIOUS_COMPLETE_DAY;
+    const resolvedCronExpr = effectiveCronExpr || current.cronExpr;
+
+    if (
+      resolvedWindowMode === SCHEDULE_WINDOW_MODES.DAY_TO_DATE_VS_PREVIOUS_DAY
+      && !isTopOfHourCronExpr(resolvedCronExpr)
+    ) {
+      return res.status(400).json({ error: 'day_to_date_vs_previous_day requires a top-of-hour cron expression (minute must be 0)' });
+    }
 
     if (updates.cronExpr) {
       updates.nextRunAt = getNextRunAt(updates.cronExpr, new Date());
@@ -62,10 +101,6 @@ router.patch('/:workflowId/schedules/:scheduleId', async (req, res, next) => {
       { $set: updates },
       { new: true }
     );
-
-    if (!schedule) {
-      return res.status(404).json({ error: 'schedule not found' });
-    }
 
     res.json({ schedule });
   } catch (error) {

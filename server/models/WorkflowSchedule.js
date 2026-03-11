@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { SCHEDULE_WINDOW_MODE_VALUES } = require('../../scheduler/app/scheduleWindowModes');
 
 const RETRY_POLICY_SCHEMA = new mongoose.Schema(
   {
@@ -16,6 +17,11 @@ const WorkflowScheduleSchema = new mongoose.Schema(
     triggerType: { type: String, enum: ['cron'], default: 'cron' },
     cronExpr: { type: String, required: true },
     timezone: { type: String, default: 'UTC' },
+    windowMode: {
+      type: String,
+      enum: SCHEDULE_WINDOW_MODE_VALUES,
+      default: 'previous_complete_day'
+    },
     isActive: { type: Boolean, default: true, index: true },
     overlapPolicy: {
       type: String,
