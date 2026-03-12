@@ -340,48 +340,81 @@ async function evaluateDueSchedules(now = new Date()) {
   const results = [];
 
   for (const schedule of schedules) {
-    const { workflowVersion, versionId } = await resolveWorkflowVersion({
-      tenantId: schedule.tenantId,
-      workflowId: schedule.workflowId,
-      version: null
-    });
+    try {
+      const { workflowVersion, versionId } = await resolveWorkflowVersion({
+        tenantId: schedule.tenantId,
+        workflowId: schedule.workflowId,
+        version: null
+      });
 
-    const scheduledRunTime = schedule.nextRunAt || now;
-    const context = buildCronContext(schedule, scheduledRunTime, {
-      metric: 'cvr'
-    });
+      const scheduledRunTime = schedule.nextRunAt || now;
+      const context = buildCronContext(schedule, scheduledRunTime, {
+        metric: 'cvr'
+      });
 
-    const queued = await enqueueRun({
-      tenantId: schedule.tenantId,
-      workflowId: schedule.workflowId,
-      version: versionId,
-      context,
-      definitionJson: workflowVersion.definitionJson,
-      triggerType: 'cron',
-      triggerRef: schedule._id,
-      overlapPolicy: schedule.overlapPolicy,
-      maxAttempts: schedule.retryPolicy?.maxAttempts || 3
-    });
+      const queued = await enqueueRun({
+        tenantId: schedule.tenantId,
+        workflowId: schedule.workflowId,
+        version: versionId,
+        context,
+        definitionJson: workflowVersion.definitionJson,
+        triggerType: 'cron',
+        triggerRef: schedule._id,
+        overlapPolicy: schedule.overlapPolicy,
+        maxAttempts: schedule.retryPolicy?.maxAttempts || 3
+      });
 
-    const nextRunAt = getNextRunAt(schedule.cronExpr, now, schedule.timezone || 'UTC');
-    await WorkflowSchedule.updateOne(
-      { _id: schedule._id },
-      {
-        $set: {
-          nextRunAt,
-          lastEvaluatedAt: now,
-          lastTriggeredAt: queued.enqueued ? now : schedule.lastTriggeredAt || null
+      const nextRunAt = getNextRunAt(schedule.cronExpr, now, schedule.timezone || 'UTC');
+      await WorkflowSchedule.updateOne(
+        { _id: schedule._id },
+        {
+          $set: {
+            nextRunAt,
+            lastEvaluatedAt: now,
+            lastTriggeredAt: queued.enqueued ? now : schedule.lastTriggeredAt || null
+          }
         }
-      }
-    );
+      );
 
-    results.push({
-      scheduleId: schedule._id,
-      workflowId: schedule.workflowId,
-      enqueued: queued.enqueued,
-      reason: queued.reason || null,
-      runId: queued.run?._id || null
-    });
+      results.push({
+        scheduleId: schedule._id,
+        workflowId: schedule.workflowId,
+        enqueued: queued.enqueued,
+        reason: queued.reason || null,
+        runId: queued.run?._id || null
+      });
+    } catch (error) {
+      const shouldDeactivate = error?.status === 404;
+      const update = shouldDeactivate
+        ? {
+            isActive: false,
+            lastEvaluatedAt: now,
+            'metadata.lastScheduleError': error.message,
+            'metadata.deactivatedReason': 'workflow_resolution_failed',
+            'metadata.deactivatedAt': now.toISOString()
+          }
+        : {
+            lastEvaluatedAt: now,
+            'metadata.lastScheduleError': error.message
+          };
+
+      await WorkflowSchedule.updateOne(
+        { _id: schedule._id },
+        { $set: update }
+      );
+
+      console.error(
+        `[scheduler] schedule evaluation failed schedule=${schedule._id} workflow=${schedule.workflowId} tenant=${schedule.tenantId} deactivate=${shouldDeactivate} error=${error.message}`
+      );
+
+      results.push({
+        scheduleId: schedule._id,
+        workflowId: schedule.workflowId,
+        enqueued: false,
+        reason: shouldDeactivate ? 'workflow_resolution_failed' : 'schedule_evaluation_failed',
+        error: error.message
+      });
+    }
   }
 
   return results;
