@@ -379,6 +379,7 @@ export default function PropertiesPanel({
 }) {
   const [data, setData] = useState(selectedNode?.data || {});
   const [ruleWorkflowSelections, setRuleWorkflowSelections] = useState({});
+  const [emailRecipientsInput, setEmailRecipientsInput] = useState('');
   const partialDayProductWarnings = useMemo(
     () => getNodePartialDayProductWarnings(data),
     [data]
@@ -387,7 +388,8 @@ export default function PropertiesPanel({
   useEffect(() => {
     setData(selectedNode?.data || {});
     setRuleWorkflowSelections({});
-  }, [selectedNode]);
+    setEmailRecipientsInput(formatEmailRecipients(selectedNode?.data?.email?.to));
+  }, [selectedNode?.id]);
 
   const handleChange = (field, value) => {
     const newData = { ...data, [field]: value };
@@ -1258,14 +1260,16 @@ export default function PropertiesPanel({
                       <label className="block text-xs font-medium text-gray-500 mb-1">Recipients</label>
                       <input
                         type="text"
-                        value={formatEmailRecipients(data.email?.to)}
-                        onChange={(e) =>
+                        value={emailRecipientsInput}
+                        onChange={(e) => {
+                          const nextValue = e.target.value;
+                          setEmailRecipientsInput(nextValue);
                           handleChange('email', {
                             ...(data.email || {}),
                             enabled: Boolean(data.email?.enabled),
-                            to: parseEmailRecipients(e.target.value)
-                          })
-                        }
+                            to: parseEmailRecipients(nextValue)
+                          });
+                        }}
                         placeholder="ops@example.com, owner@example.com"
                         className="w-full border p-2 rounded text-sm"
                       />
