@@ -3,7 +3,8 @@ const {
   claimRunById,
   promoteDeferredRun,
   republishDueRetryRuns,
-  bootstrapDispatchRunnableRuns
+  bootstrapDispatchRunnableRuns,
+  recoverExpiredRunningRuns
 } = require('../app/runQueueService');
 const { executeRun } = require('../../server/services/workflowExecutionService');
 const { getRetryDelayMs } = require('../domain/retryPolicy');
@@ -39,6 +40,8 @@ async function processClaimedRun(run) {
       run.status = 'dead_letter';
       run.finishedAt = new Date();
       run.lastError = error.message;
+      run.leaseOwner = null;
+      run.leaseExpiresAt = null;
       await run.save();
       console.error(`[scheduler-worker] dead-lettered run=${run._id} workflow=${run.workflowId} workflowName="${workflowName}" lastError=${run.lastError}`);
       await promoteDeferredRun(run.tenantId, run.workflowId, run.executionKey);
@@ -49,6 +52,8 @@ async function processClaimedRun(run) {
     run.nextRetryAt = new Date(Date.now() + delayMs);
     run.lastError = error.message;
     run.finishedAt = null;
+    run.leaseOwner = null;
+    run.leaseExpiresAt = null;
     await run.save();
     console.warn(`[scheduler-worker] scheduled retry run=${run._id} workflow=${run.workflowId} workflowName="${workflowName}" nextRetryAt=${run.nextRetryAt.toISOString()} delayMs=${delayMs}`);
     return { runId: run._id, status: 'retrying' };
@@ -62,6 +67,7 @@ function useRabbitRunQueue() {
 async function runLoopMongo({ workerId, intervalMs = 2000, stopSignal }) {
   while (!stopSignal.stopped) {
     try {
+      await recoverExpiredRunningRuns();
       const result = await processOne(workerId);
       if (!result) {
         await new Promise(resolve => setTimeout(resolve, intervalMs));
@@ -78,10 +84,12 @@ async function runLoopRabbit({ workerId, intervalMs = 2000, stopSignal }) {
 
   // Best-effort recovery: re-dispatch runnable DB-backed runs when worker starts.
   await bootstrapDispatchRunnableRuns();
+  await recoverExpiredRunningRuns();
 
   const retryTickMs = Number(process.env.SCHEDULER_RETRY_TICK_MS || 2000);
   const retryTimer = setInterval(async () => {
     try {
+      await recoverExpiredRunningRuns();
       await republishDueRetryRuns();
     } catch (error) {
       console.error('[scheduler-worker] retry republish failed', error.message);

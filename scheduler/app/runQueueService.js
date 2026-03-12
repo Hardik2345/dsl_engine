@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const WorkflowRun = require('../../server/models/WorkflowRun');
 const { ACTIVE_STATUSES, PENDING_STATUSES, evaluateOverlap } = require('../domain/overlapPolicy');
 const { getRabbitWorkflowRunQueue } = require('../infra/runQueue/RabbitWorkflowRunQueue');
+const { getRetryDelayMs } = require('../domain/retryPolicy');
 
 function useRabbitRunQueue() {
   return process.env.SCHEDULER_RUN_QUEUE_BACKEND === 'rabbit';
@@ -251,6 +252,72 @@ async function bootstrapDispatchRunnableRuns(limit = 500) {
   return { count: runs.length };
 }
 
+async function recoverExpiredRunningRuns(limit = 100) {
+  const now = new Date();
+  const recovered = [];
+
+  for (let i = 0; i < limit; i += 1) {
+    const claimedExpired = await WorkflowRun.findOneAndUpdate(
+      {
+        status: 'running',
+        leaseExpiresAt: { $lte: now }
+      },
+      {
+        $set: {
+          status: 'recovering'
+        }
+      },
+      {
+        sort: { leaseExpiresAt: 1, createdAt: 1 },
+        new: false
+      }
+    );
+
+    if (!claimedExpired) break;
+
+    const workflowName = claimedExpired.definitionJson?.name || 'unknown';
+    const delayMs = getRetryDelayMs(
+      { maxAttempts: claimedExpired.maxAttempts || 3, backoffSeconds: [30, 120, 600] },
+      claimedExpired.attempt || 1
+    );
+
+    if (delayMs === null) {
+      claimedExpired.status = 'dead_letter';
+      claimedExpired.finishedAt = now;
+      claimedExpired.lastError = 'lease_expired';
+      claimedExpired.leaseOwner = null;
+      claimedExpired.leaseExpiresAt = null;
+      await claimedExpired.save();
+      console.warn(`[run-queue] recovered expired lease run=${claimedExpired._id} workflow=${claimedExpired.workflowId} workflowName="${workflowName}" tenant=${claimedExpired.tenantId} -> dead_letter`);
+      await promoteDeferredRun(claimedExpired.tenantId, claimedExpired.workflowId, claimedExpired.executionKey);
+      recovered.push({ runId: claimedExpired._id, status: 'dead_letter' });
+      continue;
+    }
+
+    claimedExpired.status = 'retrying';
+    claimedExpired.nextRetryAt = new Date(now.getTime() + delayMs);
+    claimedExpired.lastError = 'lease_expired';
+    claimedExpired.finishedAt = null;
+    claimedExpired.leaseOwner = null;
+    claimedExpired.leaseExpiresAt = null;
+    await claimedExpired.save();
+    console.warn(`[run-queue] recovered expired lease run=${claimedExpired._id} workflow=${claimedExpired.workflowId} workflowName="${workflowName}" tenant=${claimedExpired.tenantId} -> retrying nextRetryAt=${claimedExpired.nextRetryAt.toISOString()}`);
+
+    if (useRabbitRunQueue()) {
+      await publishRunDispatch(claimedExpired._id, {
+        triggerType: claimedExpired.triggerType || 'retry',
+        tenantId: claimedExpired.tenantId,
+        workflowId: claimedExpired.workflowId,
+        recovered: true
+      });
+    }
+
+    recovered.push({ runId: claimedExpired._id, status: 'retrying' });
+  }
+
+  return { count: recovered.length, recovered };
+}
+
 module.exports = {
   enqueueRun,
   claimNextRunnableRun,
@@ -259,5 +326,6 @@ module.exports = {
   getExecutionKey,
   publishRunDispatch,
   republishDueRetryRuns,
-  bootstrapDispatchRunnableRuns
+  bootstrapDispatchRunnableRuns,
+  recoverExpiredRunningRuns
 };

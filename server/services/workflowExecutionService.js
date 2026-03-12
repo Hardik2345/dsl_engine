@@ -54,6 +54,8 @@ async function executeRun({ run, runId }) {
     targetRun.startedAt = startedAt;
     targetRun.finishedAt = new Date();
     targetRun.lastError = undefined;
+    targetRun.leaseOwner = null;
+    targetRun.leaseExpiresAt = null;
 
     await targetRun.save();
 
@@ -81,6 +83,8 @@ async function executeRun({ run, runId }) {
     targetRun.startedAt = startedAt;
     targetRun.finishedAt = new Date();
     targetRun.lastError = error.message;
+    targetRun.leaseOwner = null;
+    targetRun.leaseExpiresAt = null;
     await targetRun.save();
     throw error;
   }
