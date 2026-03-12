@@ -220,6 +220,7 @@ export default function WorkflowDetailPage() {
 
   const workflowEvents = triggerEvents.filter((event) => event.matchedWorkflowId === workflowId);
   const workflowUnmatched = unmatchedAlerts.filter((alert) => alert.alertType === definition?.trigger?.alertType);
+  const workflowDescription = definition?.description || 'No description';
 
   return (
     <div>
@@ -231,36 +232,42 @@ export default function WorkflowDetailPage() {
         Back to Workflows
       </Link>
 
-      <div className="flex items-start justify-between mb-6">
-        <div>
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between mb-6">
+        <div className="min-w-0 flex-1 max-w-2xl">
           <h1 className="text-2xl font-bold text-gray-900">{workflow?.name || workflowId}</h1>
           <p className="text-xs text-gray-400 font-mono mt-1">{workflowId}</p>
-          <p className="text-gray-500 mt-1">
-            {definition?.description || 'No description'}
+          <p className="mt-3 max-w-xl text-[15px] leading-7 text-gray-500 line-clamp-2">
+            {workflowDescription}
           </p>
         </div>
-        <div className="flex gap-2">
-          <Link to={`/workflows/${workflowId}/runs`}>
-            <Button variant="secondary">
+        <div className="flex flex-nowrap items-center gap-2 overflow-x-auto xl:flex-shrink-0 xl:justify-end xl:overflow-visible">
+          <div className="flex flex-nowrap items-center gap-2">
+            <Link to={`/workflows/${workflowId}/runs`}>
+              <Button variant="secondary" className="h-10 min-w-[120px] px-4 whitespace-nowrap text-sm">
               <Clock className="w-4 h-4 mr-2" />
               View Runs
-            </Button>
-          </Link>
-          <Link to={`/workflows/${workflowId}/edit/visual`}>
-            <Button variant="secondary">
+              </Button>
+            </Link>
+            <Link to={`/workflows/${workflowId}/edit/visual`}>
+              <Button variant="secondary" className="h-10 min-w-[128px] px-4 whitespace-nowrap text-sm">
               <Layout className="w-4 h-4 mr-2" />
               Visual Editor
+              </Button>
+            </Link>
+            <Button
+              variant="secondary"
+              onClick={() => setEditModalOpen(true)}
+              className="h-10 min-w-[122px] px-4 whitespace-nowrap text-sm"
+            >
+              <Edit2 className="w-4 h-4 mr-2" />
+              Edit JSON
             </Button>
-          </Link>
-          <Button variant="secondary" onClick={() => setEditModalOpen(true)}>
-            <Edit2 className="w-4 h-4 mr-2" />
-            Edit JSON
-          </Button>
-          <Button variant="danger" onClick={handleDelete}>
+          </div>
+          <Button variant="danger" onClick={handleDelete} className="h-10 min-w-[122px] px-4 whitespace-nowrap text-sm">
             <Trash2 className="w-4 h-4 mr-2" />
             Delete
           </Button>
-          <Button onClick={() => setRunModalOpen(true)}>
+          <Button onClick={() => setRunModalOpen(true)} className="h-10 min-w-[148px] px-4 whitespace-nowrap text-sm">
             <Play className="w-4 h-4 mr-2" />
             Run Workflow
           </Button>
