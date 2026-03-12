@@ -19,12 +19,16 @@ export default function WorkflowRunsPage() {
     try {
       const result = await executeWorkflow.mutateAsync({
         context: run.context,
+        rerun: true,
       });
       toast.success(`Workflow rerun started: ${result.runId}`);
       // Explicitly refetch to update the list immediately
       refetch();
     } catch (err) {
-      toast.error(err.response?.data?.error || 'Failed to rerun workflow');
+      const errorMessage = err.response?.data?.error
+        || (Array.isArray(err.response?.data?.errors) ? err.response.data.errors.join(', ') : null)
+        || 'Failed to rerun workflow';
+      toast.error(errorMessage);
     } finally {
       setRerunningRunId(null);
     }

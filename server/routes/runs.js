@@ -9,15 +9,62 @@ const { enqueueRun } = require('../../scheduler/app/runQueueService');
 
 const router = express.Router({ mergeParams: true });
 
+function normalizeSqlDateTimeToHour(value) {
+  if (typeof value !== 'string') return value;
+
+  const parsed = new Date(value);
+  if (!Number.isNaN(parsed.getTime())) {
+    const year = parsed.getUTCFullYear();
+    const month = String(parsed.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(parsed.getUTCDate()).padStart(2, '0');
+    const hour = String(parsed.getUTCHours()).padStart(2, '0');
+    return `${year}-${month}-${day} ${hour}:00:00`;
+  }
+
+  const match = value.trim().match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}):\d{2}(?::\d{2})?$/);
+  if (!match) return value;
+  return `${match[1]} ${match[2]}:00:00`;
+}
+
+function normalizeRerunContext(context) {
+  if (!context || typeof context !== 'object') return context;
+
+  const nextContext = {
+    ...context,
+    meta: {
+      ...(context.meta || {})
+    }
+  };
+
+  if (nextContext.meta.window) {
+    nextContext.meta.window = {
+      ...nextContext.meta.window,
+      start: normalizeSqlDateTimeToHour(nextContext.meta.window.start),
+      end: normalizeSqlDateTimeToHour(nextContext.meta.window.end)
+    };
+  }
+
+  if (nextContext.meta.baselineWindow) {
+    nextContext.meta.baselineWindow = {
+      ...nextContext.meta.baselineWindow,
+      start: normalizeSqlDateTimeToHour(nextContext.meta.baselineWindow.start),
+      end: normalizeSqlDateTimeToHour(nextContext.meta.baselineWindow.end)
+    };
+  }
+
+  return nextContext;
+}
+
 router.post('/:workflowId/runs', async (req, res, next) => {
   try {
     const { tenantId, workflowId } = req.params;
-    const { version, context } = req.body || {};
+    const { version, context, rerun } = req.body || {};
     const mode = req.query.mode === 'async' ? 'async' : 'sync';
+    const effectiveContext = rerun ? normalizeRerunContext(context) : context;
 
-    const { ok, errors } = validateRunContext(context);
+    const { ok, errors } = validateRunContext(effectiveContext);
     if (!ok) return res.status(400).json({ errors });
-    if (context.meta.tenantId !== tenantId) {
+    if (effectiveContext.meta.tenantId !== tenantId) {
       return res.status(400).json({ error: 'tenantId mismatch in context' });
     }
 
@@ -27,7 +74,7 @@ router.post('/:workflowId/runs', async (req, res, next) => {
       version
     });
 
-    const compatibility = validateRunContextAgainstWorkflow(context, workflowVersion.definitionJson);
+    const compatibility = validateRunContextAgainstWorkflow(effectiveContext, workflowVersion.definitionJson);
     if (!compatibility.ok) {
       return res.status(400).json({ errors: compatibility.errors });
     }
@@ -37,7 +84,7 @@ router.post('/:workflowId/runs', async (req, res, next) => {
         tenantId,
         workflowId,
         version: versionId,
-        context,
+        context: effectiveContext,
         definitionJson: workflowVersion.definitionJson,
         triggerType: 'manual',
         triggerRef: null,
@@ -67,7 +114,7 @@ router.post('/:workflowId/runs', async (req, res, next) => {
       triggerType: 'manual',
       triggerRef: null,
       executionKey: `${tenantId}:${workflowId}`,
-      context,
+      context: effectiveContext,
       definitionJson: workflowVersion.definitionJson,
       metrics: {},
       executionTrace: [],
