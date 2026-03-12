@@ -75,6 +75,11 @@ class WorkflowRunner {
     const visited = new Set();
     const { workflowIdentity, sharedState } = frame;
 
+    context.meta = context.meta || {};
+    context.meta.workflowId = workflowDefinition.workflow_id || context.meta.workflowId;
+    context.meta.workflowName = workflowDefinition.name || workflowDefinition.workflow_id || context.meta.workflowName;
+    context.meta.brandName = inferBrandName(workflowDefinition, context.meta);
+
     // --- execution trace ---
     context.executionTrace = context.executionTrace || [];
 
@@ -258,6 +263,18 @@ class WorkflowRunner {
       sharedState.workflowRefDepth -= 1;
     }
   }
+}
+
+function inferBrandName(workflowDefinition, meta = {}) {
+  const configuredBrandIds = workflowDefinition?.trigger?.brandScope === 'single'
+    ? workflowDefinition?.trigger?.brandIds
+    : null;
+
+  if (Array.isArray(configuredBrandIds) && configuredBrandIds.length === 1) {
+    return configuredBrandIds[0];
+  }
+
+  return meta.brandName || meta.tenantId || null;
 }
 
 // Example usage

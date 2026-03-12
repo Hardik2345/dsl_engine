@@ -114,7 +114,8 @@ async function InsightNode(def, context) {
     const renderedEmail = renderInsightEmail({
       insight,
       workflowId: context?.workflow_id || context?.meta?.workflowId,
-      nodeId: def.id
+      workflowName: context?.meta?.workflowName,
+      brandName: context?.meta?.brandName
     });
 
     emailResult = await sendEmail({

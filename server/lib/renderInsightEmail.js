@@ -70,7 +70,7 @@ function renderDetailCard(detail, index) {
   `;
 }
 
-function renderInsightEmail({ insight, workflowId, nodeId }) {
+function renderInsightEmail({ insight, workflowId, workflowName, brandName }) {
   const summary = insight?.summary || 'Insight generated';
   const details = Array.isArray(insight?.details)
     ? insight.details.filter((detail) => detail !== undefined && detail !== null && String(detail).trim() !== '')
@@ -80,7 +80,9 @@ function renderInsightEmail({ insight, workflowId, nodeId }) {
     ? null
     : `${Math.round(Number(confidence) * 100)}%`;
 
-  const subject = `DSL Insight: ${summary}`.slice(0, 200);
+  const subject = `Datum Intelligence Insight: ${summary}`.slice(0, 200);
+  const workflowLabel = workflowName || workflowId || 'workflow';
+  const brandLabel = brandName || 'unknown brand';
 
   const detailsHtml = details.length
     ? `
@@ -121,9 +123,12 @@ function renderInsightEmail({ insight, workflowId, nodeId }) {
         <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse:collapse;">
           <tr>
             <td valign="top">
-            <div style="font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#cbd5e1 !important;-webkit-text-fill-color:#cbd5e1;">DSL Engine Insight</div>
+            <div style="font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#cbd5e1 !important;-webkit-text-fill-color:#cbd5e1;">Datum Intelligence Insight</div>
             <div style="margin-top:10px;font-size:15px;line-height:1.5;color:#f8fafc !important;-webkit-text-fill-color:#f8fafc;">
-              ${escapeHtml(workflowId || 'workflow')}<span style="opacity:0.55;"> / </span>${escapeHtml(nodeId || 'insight')}
+              ${escapeHtml(workflowLabel)}
+            </div>
+            <div style="margin-top:4px;font-size:13px;line-height:1.5;color:#cbd5e1 !important;-webkit-text-fill-color:#cbd5e1;">
+              Brand<span style="opacity:0.55;"> / </span>${escapeHtml(brandLabel)}
             </div>
             </td>
             <td valign="top" align="right" style="width:1%;white-space:nowrap;">
@@ -144,7 +149,7 @@ function renderInsightEmail({ insight, workflowId, nodeId }) {
         </div>
         ${detailsHtml}
         <div style="margin-top:28px;padding-top:16px;border-top:1px solid #e5e7eb;font-size:12px;line-height:1.6;color:#64748b;">
-          This message was generated automatically by DSL Engine to help you identify the issue quickly.
+          This message was generated automatically by Datum Intelligence to help you identify the issue quickly.
         </div>
       </div>
     </div>
@@ -152,9 +157,9 @@ function renderInsightEmail({ insight, workflowId, nodeId }) {
 </html>`;
 
   const textLines = [
-    'DSL Engine Insight',
-    workflowId ? `Workflow: ${workflowId}` : null,
-    nodeId ? `Node: ${nodeId}` : null,
+    'Datum Intelligence Insight',
+    workflowLabel ? `Workflow: ${workflowLabel}` : null,
+    brandLabel ? `Brand: ${brandLabel}` : null,
     '',
     `Summary: ${summary}`,
     details.length ? '' : null,
