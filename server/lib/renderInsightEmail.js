@@ -90,7 +90,7 @@ function renderInsightEmail({ insight, workflowId, workflowName, brandName, subj
   const subjectBody = String(subjectTemplate || summary).trim() || summary;
   const subject = `${tenantPrefix}: ${subjectBody}`.slice(0, 200);
   const workflowLabel = workflowName || workflowId || 'workflow';
-  const brandLabel = brandName || 'unknown brand';
+  const brandLabel = brandName || tenantId || 'unknown brand';
 
   const detailsHtml = details.length
     ? `
