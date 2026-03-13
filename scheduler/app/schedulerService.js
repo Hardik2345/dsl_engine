@@ -47,7 +47,11 @@ async function getWorkflowCandidates(tenantId, includeGlobal = true) {
 function buildDefaultContext(tenantId, payload) {
   const now = new Date().toISOString();
   const bodyContext = payload?.context;
-  if (bodyContext && typeof bodyContext === 'object') return bodyContext;
+  if (bodyContext && typeof bodyContext === 'object') {
+    bodyContext.meta = bodyContext.meta || {};
+    bodyContext.meta.tenantId = bodyContext.meta.tenantId || tenantId;
+    return bodyContext;
+  }
 
   return {
     meta: {
