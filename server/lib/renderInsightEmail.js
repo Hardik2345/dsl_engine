@@ -57,8 +57,10 @@ function renderDetailCard(detail, index) {
                     <td valign="top" style="padding:0 14px 8px 0;font-size:12px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:#64748b;white-space:nowrap;">
                       ${escapeHtml(row.label)}
                     </td>
-                    <td valign="top" style="padding:0 0 8px 0;font-size:18px;font-weight:700;line-height:1.2;color:${getValueColor(row.value)};font-variant-numeric:tabular-nums;white-space:nowrap;">
-                      ${escapeHtml(row.value)}
+                    <td valign="top" style="padding:0 0 8px 0;font-size:18px;font-weight:700;line-height:1.2;font-variant-numeric:tabular-nums;white-space:nowrap;">
+                      <span style="color:${getValueColor(row.value)} !important;-webkit-text-fill-color:${getValueColor(row.value)};font-weight:700;">
+                        ${escapeHtml(row.value)}
+                      </span>
                     </td>
                   </tr>
                 `).join('')}
