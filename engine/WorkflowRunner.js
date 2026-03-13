@@ -266,6 +266,14 @@ class WorkflowRunner {
 }
 
 function inferBrandName(workflowDefinition, meta = {}) {
+  if (meta.brandName) {
+    return meta.brandName;
+  }
+
+  if (meta.tenantId) {
+    return meta.tenantId;
+  }
+
   const configuredBrandIds = workflowDefinition?.trigger?.brandScope === 'single'
     ? workflowDefinition?.trigger?.brandIds
     : null;
@@ -274,7 +282,7 @@ function inferBrandName(workflowDefinition, meta = {}) {
     return configuredBrandIds[0];
   }
 
-  return meta.brandName || meta.tenantId || null;
+  return null;
 }
 
 // Example usage

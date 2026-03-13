@@ -6,54 +6,9 @@ const {
 } = require('../validation/productPartialDayCompatibility');
 const { resolveWorkflowVersion, executeRun } = require('../services/workflowExecutionService');
 const { enqueueRun } = require('../../scheduler/app/runQueueService');
+const { normalizeRerunContext } = require('../../lib/timeWindowUtils');
 
 const router = express.Router({ mergeParams: true });
-
-function normalizeSqlDateTimeToHour(value) {
-  if (typeof value !== 'string') return value;
-
-  const parsed = new Date(value);
-  if (!Number.isNaN(parsed.getTime())) {
-    const year = parsed.getUTCFullYear();
-    const month = String(parsed.getUTCMonth() + 1).padStart(2, '0');
-    const day = String(parsed.getUTCDate()).padStart(2, '0');
-    const hour = String(parsed.getUTCHours()).padStart(2, '0');
-    return `${year}-${month}-${day} ${hour}:00:00`;
-  }
-
-  const match = value.trim().match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}):\d{2}(?::\d{2})?$/);
-  if (!match) return value;
-  return `${match[1]} ${match[2]}:00:00`;
-}
-
-function normalizeRerunContext(context) {
-  if (!context || typeof context !== 'object') return context;
-
-  const nextContext = {
-    ...context,
-    meta: {
-      ...(context.meta || {})
-    }
-  };
-
-  if (nextContext.meta.window) {
-    nextContext.meta.window = {
-      ...nextContext.meta.window,
-      start: normalizeSqlDateTimeToHour(nextContext.meta.window.start),
-      end: normalizeSqlDateTimeToHour(nextContext.meta.window.end)
-    };
-  }
-
-  if (nextContext.meta.baselineWindow) {
-    nextContext.meta.baselineWindow = {
-      ...nextContext.meta.baselineWindow,
-      start: normalizeSqlDateTimeToHour(nextContext.meta.baselineWindow.start),
-      end: normalizeSqlDateTimeToHour(nextContext.meta.baselineWindow.end)
-    };
-  }
-
-  return nextContext;
-}
 
 router.post('/:workflowId/runs', async (req, res, next) => {
   try {

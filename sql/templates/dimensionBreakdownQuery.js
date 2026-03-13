@@ -2,7 +2,8 @@
 
 const {
   isFullDayAlignedWindow,
-  listHourlyProductUnsupportedFilters
+  listHourlyProductUnsupportedFilters,
+  normalizeWindowForQuery
 } = require('../../lib/timeWindowUtils');
 
 const ALLOWED_DIMENSIONS = new Set([
@@ -24,11 +25,6 @@ function assertSafeDimension(dimension) {
   if (!ALLOWED_DIMENSIONS.has(dimension)) {
     throw new Error(`dimensionBreakdownQuery: unsupported dimension "${dimension}"`);
   }
-}
-
-function normalizeDateTime(value) {
-  if (!value || typeof value !== 'string') return value;
-  return value.replace('T', ' ').replace('Z', '');
 }
 
 function buildFilterWhere(filters = []) {
@@ -105,10 +101,12 @@ module.exports = function dimensionBreakdownQuery({
     ? buildHourlyProductFilterWhere(filters)
     : buildFilterWhere(filters);
   const notNullSql = buildNotNullFilter(dimension);
-  const windowStart = normalizeDateTime(window.start);
-  const windowEnd = normalizeDateTime(window.end);
-  const baselineStart = normalizeDateTime(baselineWindow.start);
-  const baselineEnd = normalizeDateTime(baselineWindow.end);
+  const normalizedWindow = normalizeWindowForQuery(window);
+  const normalizedBaselineWindow = normalizeWindowForQuery(baselineWindow);
+  const windowStart = normalizedWindow.start;
+  const windowEnd = normalizedWindow.end;
+  const baselineStart = normalizedBaselineWindow.start;
+  const baselineEnd = normalizedBaselineWindow.end;
   const includeProductTitle = dimension === 'product_id';
   const titleStart = baselineStart;
   const titleEnd = windowEnd;

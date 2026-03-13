@@ -1,19 +1,17 @@
 // sql/templates/metricQuery.js
-
-function normalizeDateTime(value) {
-  if (!value || typeof value !== 'string') return value;
-  return value.replace('T', ' ').replace('Z', '');
-}
+const { normalizeWindowForQuery } = require('../../lib/timeWindowUtils');
 
 module.exports = function metricQuery({ tenantId, metrics = [], window, baselineWindow }) {
   if (!tenantId) throw new Error('metricQuery: tenantId is required (db selector)');
   if (!window?.start || !window?.end) throw new Error('metricQuery: window.start/window.end required');
   if (!baselineWindow?.start || !baselineWindow?.end) throw new Error('metricQuery: baselineWindow.start/window.end required');
 
-  const windowStart = normalizeDateTime(window.start);
-  const windowEnd = normalizeDateTime(window.end);
-  const baselineStart = normalizeDateTime(baselineWindow.start);
-  const baselineEnd = normalizeDateTime(baselineWindow.end);
+  const normalizedWindow = normalizeWindowForQuery(window);
+  const normalizedBaselineWindow = normalizeWindowForQuery(baselineWindow);
+  const windowStart = normalizedWindow.start;
+  const windowEnd = normalizedWindow.end;
+  const baselineStart = normalizedBaselineWindow.start;
+  const baselineEnd = normalizedBaselineWindow.end;
 
   const sql = `
 WITH
