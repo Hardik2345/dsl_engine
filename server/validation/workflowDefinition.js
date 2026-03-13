@@ -187,6 +187,12 @@ function validateWorkflowDefinition(definition) {
           ) {
             errors.push(`insight node ${node.id} email.enabled must be boolean`);
           }
+          if (
+            node.email.subject !== undefined &&
+            (typeof node.email.subject !== 'string' || node.email.subject.trim() === '')
+          ) {
+            errors.push(`insight node ${node.id} email.subject must be a non-empty string when provided`);
+          }
           if (node.email.to !== undefined && !Array.isArray(node.email.to)) {
             errors.push(`insight node ${node.id} email.to must be an array`);
           }

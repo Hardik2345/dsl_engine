@@ -11,6 +11,12 @@ function escapeHtmlPreserveBreaks(value) {
   return escapeHtml(value).replace(/\n/g, '<br />');
 }
 
+function getValueColor(value) {
+  const normalized = String(value || '').trim();
+  if (normalized.startsWith('-')) return '#dc2626';
+  return '#059669';
+}
+
 function renderDetailCard(detail, index) {
   const lines = String(detail || '')
     .split('\n')
@@ -51,7 +57,7 @@ function renderDetailCard(detail, index) {
                     <td valign="top" style="padding:0 14px 8px 0;font-size:12px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:#64748b;white-space:nowrap;">
                       ${escapeHtml(row.label)}
                     </td>
-                    <td valign="top" style="padding:0 0 8px 0;font-size:18px;font-weight:700;line-height:1.2;color:#111827;font-variant-numeric:tabular-nums;white-space:nowrap;">
+                    <td valign="top" style="padding:0 0 8px 0;font-size:18px;font-weight:700;line-height:1.2;color:${getValueColor(row.value)};font-variant-numeric:tabular-nums;white-space:nowrap;">
                       ${escapeHtml(row.value)}
                     </td>
                   </tr>
@@ -70,7 +76,7 @@ function renderDetailCard(detail, index) {
   `;
 }
 
-function renderInsightEmail({ insight, workflowId, workflowName, brandName }) {
+function renderInsightEmail({ insight, workflowId, workflowName, brandName, subjectTemplate, tenantId }) {
   const summary = insight?.summary || 'Insight generated';
   const details = Array.isArray(insight?.details)
     ? insight.details.filter((detail) => detail !== undefined && detail !== null && String(detail).trim() !== '')
@@ -80,7 +86,9 @@ function renderInsightEmail({ insight, workflowId, workflowName, brandName }) {
     ? null
     : `${Math.round(Number(confidence) * 100)}%`;
 
-  const subject = `Datum Intelligence Insight: ${summary}`.slice(0, 200);
+  const tenantPrefix = (tenantId || brandName || 'Tenant').trim();
+  const subjectBody = String(subjectTemplate || summary).trim() || summary;
+  const subject = `${tenantPrefix}: ${subjectBody}`.slice(0, 200);
   const workflowLabel = workflowName || workflowId || 'workflow';
   const brandLabel = brandName || 'unknown brand';
 

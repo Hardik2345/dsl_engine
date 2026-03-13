@@ -1274,7 +1274,27 @@ export default function PropertiesPanel({
                         className="w-full border p-2 rounded text-sm"
                       />
                       <div className="text-[10px] text-gray-400 mt-1">
-                        The HTML email layout is fixed. Only recipients are configurable here.
+                        The HTML email layout is fixed. Subject and recipients are configurable here.
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Subject</label>
+                      <input
+                        type="text"
+                        value={data.email?.subject || ''}
+                        onChange={(e) =>
+                          handleChange('email', {
+                            ...(data.email || {}),
+                            enabled: Boolean(data.email?.enabled),
+                            to: Array.isArray(data.email?.to) ? data.email.to : [],
+                            subject: e.target.value
+                          })
+                        }
+                        placeholder="CVR drop alert"
+                        className="w-full border p-2 rounded text-sm"
+                      />
+                      <div className="text-[10px] text-gray-400 mt-1">
+                        Email subject will be sent as: <span className="font-mono">TENANT_ID: your subject</span>
                       </div>
                     </div>
                  </div>

@@ -115,7 +115,9 @@ async function InsightNode(def, context) {
       insight,
       workflowId: context?.workflow_id || context?.meta?.workflowId,
       workflowName: context?.meta?.workflowName,
-      brandName: context?.meta?.brandName || context?.meta?.tenantId
+      brandName: context?.meta?.brandName || context?.meta?.tenantId,
+      subjectTemplate: email?.subject,
+      tenantId: context?.meta?.tenantId
     });
 
     emailResult = await sendEmail({
