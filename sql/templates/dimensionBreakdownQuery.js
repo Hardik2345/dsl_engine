@@ -34,6 +34,13 @@ function buildFilterWhere(filters = []) {
   for (const f of filters) {
     if (!f?.dimension || f.value === undefined) continue;
     if (!ALLOWED_DIMENSIONS.has(f.dimension)) continue;
+    if (Array.isArray(f.value)) {
+      const values = Array.from(new Set(f.value.filter((value) => value !== undefined && value !== null && value !== '')));
+      if (!values.length) continue;
+      clauses.push(`${f.dimension} IN (${values.map(() => '?').join(', ')})`);
+      params.push(...values);
+      continue;
+    }
 
     clauses.push(`${f.dimension} = ?`);
     params.push(f.value);
@@ -72,6 +79,14 @@ function buildHourlyProductFilterWhere(filters = []) {
 
   for (const f of filters) {
     if (f?.dimension !== 'product_id' || f.value === undefined) continue;
+    if (Array.isArray(f.value)) {
+      const values = Array.from(new Set(f.value.filter((value) => value !== undefined && value !== null && value !== '')));
+      if (!values.length) continue;
+      clauses.push(`product_id IN (${values.map(() => '?').join(', ')})`);
+      params.push(...values);
+      continue;
+    }
+
     clauses.push('product_id = ?');
     params.push(f.value);
   }

@@ -16,6 +16,8 @@ async function RecursiveDimensionBreakdownNode(def, context) {
     rank_order = 'desc',
     filter_mode = 'drop',
     min_sessions_mode = 'both_low',
+    input_scope = 'global',
+    input_key,
     output_key,
     next
   } = def;
@@ -37,7 +39,9 @@ async function RecursiveDimensionBreakdownNode(def, context) {
   const {
     meta,
     metrics,
-    filters = []
+    filters = [],
+    breakdowns = {},
+    scratch = {}
   } = context;
 
   const dimensionList = Array.isArray(dimensions) && dimensions.length
@@ -67,6 +71,19 @@ async function RecursiveDimensionBreakdownNode(def, context) {
   }
 
   const evidence = [];
+  const inheritedFilters = resolveInheritedFilters({
+    inputScope: input_scope,
+    inputKey: normalizeOutputKey(input_key),
+    breakdowns,
+    scratch
+  });
+
+  if (input_scope === 'breakdown' && inheritedFilters.error) {
+    return {
+      status: 'fail',
+      reason: inheritedFilters.error
+    };
+  }
 
   /**
    * Internal recursive function
@@ -81,12 +98,14 @@ async function RecursiveDimensionBreakdownNode(def, context) {
     const needsOrders = base_metric === 'orders' || base_metric === 'cvr';
     const includeOrders = include_orders ?? needsOrders;
 
+    const scopedFilters = mergeFilters(activeFilters, inheritedFilters.filters || []);
+
     const querySpec = queryBuilder.buildDimensionBreakdownQuery({
       tenantId: meta.tenantId,
       dimension: activeDimension,
       window: meta.window,
       baselineWindow: meta.baselineWindow,
-      filters: activeFilters,
+      filters: scopedFilters,
       includeOrders
     });
 
@@ -95,6 +114,7 @@ async function RecursiveDimensionBreakdownNode(def, context) {
       depth,
       dimension: activeDimension,
       filters: activeFilters,
+      scopedFilters,
       rowCount: result?.rows?.length || 0
     });
     if (!result?.rows?.length) return;
@@ -577,6 +597,78 @@ function formatBaselineList(entries, options = {}) {
 
     return parts.join(' | ');
   }).join('\n');
+}
+
+function resolveInheritedFilters({ inputScope, inputKey, breakdowns = {}, scratch = {} }) {
+  if (inputScope !== 'breakdown') {
+    return { filters: [] };
+  }
+
+  if (!inputKey) {
+    return { error: 'RecursiveDimensionBreakdownNode: input breakdown key is required' };
+  }
+
+  const entries = Array.isArray(breakdowns?.[inputKey]) ? breakdowns[inputKey] : [];
+
+  if (!entries.length) {
+    return {
+      error: `RecursiveDimensionBreakdownNode: input breakdown '${inputKey}' not found or empty`
+    };
+  }
+
+  const filter = breakdownEntriesToFilter(entries);
+  if (!filter) {
+    return {
+      error: `RecursiveDimensionBreakdownNode: input breakdown '${inputKey}' cannot be converted into a filter`
+    };
+  }
+
+  return { filters: [filter] };
+}
+
+function breakdownEntriesToFilter(entries = []) {
+  if (!Array.isArray(entries) || entries.length === 0) {
+    return null;
+  }
+
+  const first = entries[0];
+  if (!first?.dimension) {
+    return null;
+  }
+
+  const dimension = first.dimension;
+  const values = Array.from(new Set(entries
+    .filter((entry) => entry?.dimension === dimension && entry?.value != null && entry.value !== '')
+    .map((entry) => entry.value)));
+
+  if (!values.length) {
+    return null;
+  }
+
+  return {
+    dimension,
+    operator: '=',
+    value: values.length === 1 ? values[0] : values
+  };
+}
+
+function mergeFilters(baseFilters = [], inheritedFilters = []) {
+  const merged = [];
+  const seen = new Set();
+
+  [...baseFilters, ...inheritedFilters].forEach((filter) => {
+    if (!filter || !filter.dimension) return;
+    const key = JSON.stringify([
+      filter.dimension,
+      filter.operator || '=',
+      filter.value
+    ]);
+    if (seen.has(key)) return;
+    seen.add(key);
+    merged.push(filter);
+  });
+
+  return merged;
 }
 
 function formatPct(value) {

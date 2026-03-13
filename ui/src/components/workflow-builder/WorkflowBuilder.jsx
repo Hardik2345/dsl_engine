@@ -8,7 +8,6 @@ import WorkflowCanvas from './WorkflowCanvas';
 import PropertiesPanel from './PropertiesPanel';
 import { jsonToGraph, graphToJson } from '../../utils/workflowTransformers';
 import {
-  OUTPUT_KEY_SUGGESTIONS,
   buildDefaultBreakdownOutputKey,
 } from '../../constants/workflowOutputKeys';
 import {
@@ -57,7 +56,7 @@ function WorkflowBuilderContent({
     [workflowImportOptions]
   );
   const breakdownOutputKeySuggestions = useMemo(() => {
-    const keys = new Set(OUTPUT_KEY_SUGGESTIONS);
+    const keys = new Set();
 
     nodes.forEach((node) => {
       const nodeType = node?.data?.type || node?.type;

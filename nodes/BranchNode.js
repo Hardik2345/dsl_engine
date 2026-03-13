@@ -149,7 +149,10 @@ function evaluateBreakdownRule(config, breakdowns = {}) {
     }
 
     if (allMatched) {
-      return entry;
+      return {
+        ...entry,
+        source_output_key: dimension
+      };
     }
   }
 

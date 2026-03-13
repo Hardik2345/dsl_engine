@@ -140,6 +140,37 @@ function validateWorkflowDefinition(definition) {
       ) {
         errors.push(`recursive_dimension_breakdown node ${node.id} has invalid output_key`);
       }
+
+      if (
+        node.input_scope !== undefined &&
+        !['global', 'breakdown'].includes(node.input_scope)
+      ) {
+        errors.push(`recursive_dimension_breakdown node ${node.id} has invalid input_scope`);
+      }
+
+      if (
+        node.input_scope === 'breakdown' &&
+        (typeof node.input_key !== 'string' || node.input_key.trim() === '')
+      ) {
+        errors.push(`recursive_dimension_breakdown node ${node.id} requires input_key when input_scope is breakdown`);
+      }
+
+      if (
+        node.input_key !== undefined &&
+        (typeof node.input_key !== 'string' || node.input_key.trim() === '')
+      ) {
+        errors.push(`recursive_dimension_breakdown node ${node.id} has invalid input_key`);
+      }
+
+      if (
+        typeof node.output_key === 'string' &&
+        typeof node.input_key === 'string' &&
+        node.output_key.trim() &&
+        node.input_key.trim() &&
+        node.output_key.trim() === node.input_key.trim()
+      ) {
+        errors.push(`recursive_dimension_breakdown node ${node.id} cannot use the same input_key and output_key`);
+      }
     }
 
     if (node.type === 'composite') {

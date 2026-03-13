@@ -2,7 +2,6 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { X, Plus, Trash2 } from 'lucide-react';
 import SuggestionInput from '../SuggestionInput';
 import { INSIGHT_BASE_TOKENS } from '../../constants/insightTokens';
-import { OUTPUT_KEY_SUGGESTIONS } from '../../constants/workflowOutputKeys';
 import { getNodePartialDayProductWarnings } from '../../utils/workflowValidation';
 
 // Generate unique ID for rules
@@ -39,6 +38,11 @@ const MIN_SESSIONS_MODE_OPTIONS = [
   { value: 'both_low', label: 'Skip only if both are low' },
   { value: 'either_low', label: 'Skip if either is low' },
   { value: 'baseline_only', label: 'Require baseline only' }
+];
+
+const BREAKDOWN_INPUT_SCOPE_OPTIONS = [
+  { value: 'global', label: 'Global' },
+  { value: 'breakdown', label: 'From Breakdown' }
 ];
 
 
@@ -253,7 +257,7 @@ function DimensionMultiSelect({ value, onChange, placeholder }) {
   );
 }
 
-function OutputKeyInput({ value, onChange, placeholder, suggestions = OUTPUT_KEY_SUGGESTIONS }) {
+function OutputKeyInput({ value, onChange, placeholder, suggestions = [] }) {
   return (
     <SuggestionInput
       value={value}
@@ -262,7 +266,7 @@ function OutputKeyInput({ value, onChange, placeholder, suggestions = OUTPUT_KEY
       onPick={(next) => onChange(next)}
       placeholder={placeholder}
       suggestions={suggestions}
-      footerLabel="Suggestions"
+      footerLabel={suggestions.length ? 'Existing keys' : undefined}
     />
   );
 }
@@ -1032,15 +1036,47 @@ export default function PropertiesPanel({
                           </select>
                      </div>
                      <div>
+                          <label className="block text-xs font-medium text-gray-500 mb-1">Input Scope</label>
+                          <select
+                              className="w-full border text-sm p-1 rounded"
+                              value={data.input_scope || 'global'}
+                              onChange={(e) => {
+                                  const nextScope = e.target.value;
+                                  const nextData = {
+                                    ...data,
+                                    input_scope: nextScope,
+                                    ...(nextScope !== 'breakdown' ? { input_key: '' } : {})
+                                  };
+                                  setData(nextData);
+                                  onChange(selectedNode.id, nextData);
+                              }}
+                          >
+                              {BREAKDOWN_INPUT_SCOPE_OPTIONS.map((opt) => (
+                                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                              ))}
+                          </select>
+                     </div>
+                     {((data.input_scope || 'global') === 'breakdown') && (
+                       <div>
+                            <label className="block text-xs font-medium text-gray-500 mb-1">Input Breakdown Key</label>
+                            <OutputKeyInput
+                                value={data.input_key || ''}
+                                onChange={(nextValue) => handleChange('input_key', nextValue)}
+                                placeholder="orders_drop_pages"
+                                suggestions={Array.from(new Set(breakdownOutputKeySuggestions))}
+                            />
+                            <p className="mt-1 text-[11px] text-gray-500">
+                              Restrict this breakdown to the full set of values produced by the selected upstream breakdown key.
+                            </p>
+                       </div>
+                     )}
+                     <div>
                           <label className="block text-xs font-medium text-gray-500 mb-1">Output Key (optional)</label>
                       <OutputKeyInput
                               value={data.output_key || ''}
                               onChange={(nextValue) => handleChange('output_key', nextValue)}
-                              placeholder="baseline_top5_pages"
-                              suggestions={Array.from(new Set([
-                                ...OUTPUT_KEY_SUGGESTIONS,
-                                ...breakdownOutputKeySuggestions
-                              ]))}
+                              placeholder="orders_drop_pages"
+                              suggestions={Array.from(new Set(breakdownOutputKeySuggestions))}
                           />
                      </div>
                      <div className="pt-2 border-t">
@@ -1122,11 +1158,7 @@ export default function PropertiesPanel({
 
       case 'insight':
           const isStructured = typeof data.template === 'object' && data.template !== null;
-          const mergedInsightTokens = Array.from(new Set([
-            ...INSIGHT_BASE_TOKENS,
-            ...OUTPUT_KEY_SUGGESTIONS,
-            ...breakdownOutputKeySuggestions
-          ]));
+          const mergedInsightTokens = Array.from(new Set(INSIGHT_BASE_TOKENS));
           
           return (
              <div className="space-y-4">
@@ -1135,11 +1167,8 @@ export default function PropertiesPanel({
                     <OutputKeyInput
                       value={data.output_key || ''}
                       onChange={(nextValue) => handleChange('output_key', nextValue)}
-                      placeholder="atc_rate_product_drops"
-                      suggestions={Array.from(new Set([
-                        ...OUTPUT_KEY_SUGGESTIONS,
-                        ...breakdownOutputKeySuggestions
-                      ]))}
+                      placeholder="sessions_product_drops"
+                      suggestions={Array.from(new Set(breakdownOutputKeySuggestions))}
                     />
                     <div className="text-[10px] text-gray-400 mt-1">
                       If set, this insight reads evidence from the matching breakdown output key.
