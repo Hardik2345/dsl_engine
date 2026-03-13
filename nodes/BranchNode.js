@@ -21,17 +21,22 @@ async function BranchNode(def, context) {
       matched: false 
     };
 
-    if (rule.any_in_breakdowns) {
-      const matchedEntry = evaluateBreakdownRule(rule.any_in_breakdowns, breakdowns);
+    if (rule.any_in_breakdowns || rule.all_in_breakdowns) {
+      const breakdownConfig = rule.any_in_breakdowns || rule.all_in_breakdowns;
+      const breakdownMode = rule.all_in_breakdowns ? 'all' : 'any';
+      const matchedEntry = evaluateBreakdownRule(breakdownConfig, breakdowns, breakdownMode);
       ruleEval.type = 'breakdown';
+      ruleEval.breakdownMode = breakdownMode;
       ruleEval.matched = !!matchedEntry;
       ruleEvaluations.push(ruleEval);
       
       if (matchedEntry) {
-        context.scratch = {
-          ...(context.scratch || {}),
-          matched_breakdown: matchedEntry
-        };
+        if (breakdownMode === 'any') {
+          context.scratch = {
+            ...(context.scratch || {}),
+            matched_breakdown: matchedEntry
+          };
+        }
         return {
           status: 'pass',
           next: rule.then,
@@ -129,7 +134,7 @@ async function BranchNode(def, context) {
 
 module.exports = BranchNode;
 
-function evaluateBreakdownRule(config, breakdowns = {}) {
+function evaluateBreakdownRule(config, breakdowns = {}, mode = 'any') {
   const { dimension, conditions = [], limit } = config || {};
   if (!dimension || !Array.isArray(conditions) || conditions.length === 0) {
     return false;
@@ -137,6 +142,7 @@ function evaluateBreakdownRule(config, breakdowns = {}) {
 
   const entries = Array.isArray(breakdowns?.[dimension]) ? breakdowns[dimension] : [];
   const pool = typeof limit === 'number' ? entries.slice(0, limit) : entries;
+  if (pool.length === 0) return false;
 
   for (const entry of pool) {
     let allMatched = true;
@@ -149,11 +155,25 @@ function evaluateBreakdownRule(config, breakdowns = {}) {
     }
 
     if (allMatched) {
-      return {
-        ...entry,
-        source_output_key: dimension
-      };
+      if (mode === 'any') {
+        return {
+          ...entry,
+          source_output_key: dimension
+        };
+      }
+      continue;
     }
+
+    if (mode === 'all') {
+      return false;
+    }
+  }
+
+  if (mode === 'all') {
+    return {
+      source_output_key: dimension,
+      count: pool.length
+    };
   }
 
   return null;

@@ -104,9 +104,30 @@ function validateWorkflowDefinition(definition) {
         errors.push(`branch node ${node.id} must include rules`);
       } else {
         for (const rule of node.rules) {
+          if (rule.any_in_breakdowns && rule.all_in_breakdowns) {
+            errors.push(`branch node ${node.id} rule ${rule._ruleId || ''} cannot define both any_in_breakdowns and all_in_breakdowns`);
+          }
+
+          const breakdownRule = rule.any_in_breakdowns || rule.all_in_breakdowns;
+          if (breakdownRule) {
+            if (typeof breakdownRule.dimension !== 'string' || breakdownRule.dimension.trim() === '') {
+              errors.push(`branch node ${node.id} has breakdown rule with invalid dimension/output key`);
+            }
+            if (!Array.isArray(breakdownRule.conditions) || breakdownRule.conditions.length === 0) {
+              errors.push(`branch node ${node.id} has breakdown rule without conditions`);
+            }
+            if (
+              breakdownRule.limit !== undefined &&
+              (!Number.isFinite(Number(breakdownRule.limit)) || Number(breakdownRule.limit) <= 0)
+            ) {
+              errors.push(`branch node ${node.id} has breakdown rule with invalid limit`);
+            }
+          }
+
           const allConditions = rule.all || [];
           const anyConditions = rule.any || [];
-          const conditions = [...allConditions, ...anyConditions];
+          const breakdownConditions = Array.isArray(breakdownRule?.conditions) ? breakdownRule.conditions : [];
+          const conditions = [...allConditions, ...anyConditions, ...breakdownConditions];
           
           for (const condition of conditions) {
             if (!ALLOWED_OPS.has(condition.op)) {
