@@ -189,6 +189,14 @@ export function useWorkflowRuns(workflowId) {
   });
 }
 
+export function useRecentRuns(limit = 50) {
+  const { tenantId } = useTenant();
+  return useQuery({
+    queryKey: ['recentRuns', tenantId, limit],
+    queryFn: () => runApi.listRecent(tenantId, limit),
+  });
+}
+
 export function useRun(workflowId, runId) {
   const { tenantId } = useTenant();
   return useQuery({

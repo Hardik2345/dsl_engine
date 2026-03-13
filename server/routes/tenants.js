@@ -1,6 +1,7 @@
 const express = require('express');
 const Tenant = require('../models/Tenant');
 const WorkflowSchedule = require('../models/WorkflowSchedule');
+const WorkflowRun = require('../models/WorkflowRun');
 const { getNextRunAt } = require('../../scheduler/app/cronUtils');
 
 function isSupportedTimeZone(timeZone) {
@@ -33,6 +34,26 @@ router.get('/:tenantId', async (req, res, next) => {
       return res.status(404).json({ error: 'Tenant not found' });
     }
     res.json({ tenant });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// List recent runs across all workflows for a tenant
+router.get('/:tenantId/runs', async (req, res, next) => {
+  try {
+    const { tenantId } = req.params;
+    const requestedLimit = Number(req.query.limit);
+    const limit = Number.isFinite(requestedLimit) && requestedLimit > 0
+      ? Math.min(requestedLimit, 200)
+      : 50;
+
+    const runs = await WorkflowRun.find({ tenantId })
+      .sort({ startedAt: -1, createdAt: -1 })
+      .limit(limit)
+      .lean();
+
+    res.json({ runs });
   } catch (err) {
     next(err);
   }

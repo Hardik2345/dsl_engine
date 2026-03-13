@@ -119,6 +119,14 @@ export const workflowApi = {
 
 // Run APIs
 export const runApi = {
+  // List recent runs across all workflows for a tenant
+  listRecent: async (tenantId, limit = 50) => {
+    const { data } = await api.get(`/tenants/${tenantId}/runs`, {
+      params: { limit }
+    });
+    return data.runs;
+  },
+
   // List runs for a workflow
   list: async (tenantId, workflowId) => {
     const { data } = await api.get(`/tenants/${tenantId}/workflows/${workflowId}/runs`);

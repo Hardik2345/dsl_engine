@@ -3,6 +3,7 @@ import Layout from './components/Layout';
 import WorkflowsPage from './pages/WorkflowsPage';
 import WorkflowDetailPage from './pages/WorkflowDetailPage';
 import WorkflowRunsPage from './pages/WorkflowRunsPage';
+import RunsPage from './pages/RunsPage';
 import RunDetailPage from './pages/RunDetailPage';
 import InsightsPage from './pages/InsightsPage';
 import SettingsPage from './pages/SettingsPage';
@@ -15,6 +16,7 @@ function App() {
         <Route path="/" element={<Navigate to="/workflows" replace />} />
         <Route path="/workflows" element={<WorkflowsPage />} />
         <Route path="/workflows/new/visual" element={<WorkflowBuilderPage />} />
+        <Route path="/runs" element={<RunsPage />} />
         <Route path="/workflows/:workflowId" element={<WorkflowDetailPage />} />
         <Route path="/workflows/:workflowId/edit/visual" element={<WorkflowBuilderPage />} />
         <Route path="/workflows/:workflowId/runs" element={<WorkflowRunsPage />} />
