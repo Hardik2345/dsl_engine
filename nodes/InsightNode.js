@@ -79,10 +79,10 @@ async function InsightNode(def, context) {
     cvr_delta_pct_fmt: formatPct(metrics.cvr_delta_pct),
     sessions_delta_pct_fmt: formatPct(metrics.sessions_delta_pct),
     orders_delta_pct_fmt: formatPct(metrics.orders_delta_pct),
-    current_cvr_pct: formatPct((metrics.current_cvr || 0) * 100),
-    baseline_cvr_pct: formatPct((metrics.baseline_cvr || 0) * 100),
-    top_current_cvr_pct: formatPct((topEvidence?.current?.cvr || 0) * 100),
-    top_baseline_cvr_pct: formatPct((topEvidence?.baseline?.cvr || 0) * 100),
+    current_cvr_pct: formatPct(metrics.current_cvr == null ? null : metrics.current_cvr * 100),
+    baseline_cvr_pct: formatPct(metrics.baseline_cvr == null ? null : metrics.baseline_cvr * 100),
+    top_current_cvr_pct: formatPct(topEvidence?.current?.cvr == null ? null : topEvidence.current.cvr * 100),
+    top_baseline_cvr_pct: formatPct(topEvidence?.baseline?.cvr == null ? null : topEvidence.baseline.cvr * 100),
     top_cvr_delta_pct_fmt: formatPct(topEvidence?.deltas?.cvr_delta_pct),
     top_atc_rate_delta_pct_fmt: formatPct(topEvidence?.deltas?.atc_rate_delta_pct),
     top_atc_sessions_delta_pct_fmt: formatPct(topEvidence?.deltas?.atc_sessions_delta_pct),
@@ -92,15 +92,17 @@ async function InsightNode(def, context) {
     top_baseline_orders: topEvidence?.baseline?.orders,
     top_current_atc_sessions: topEvidence?.current?.atc_sessions,
     top_baseline_atc_sessions: topEvidence?.baseline?.atc_sessions,
-    top_current_atc_rate_pct: formatPct((topEvidence?.current?.atc_rate || 0) * 100),
-    top_baseline_atc_rate_pct: formatPct((topEvidence?.baseline?.atc_rate || 0) * 100),
+    top_current_atc_rate_pct: formatPct(topEvidence?.current?.atc_rate == null ? null : topEvidence.current.atc_rate * 100),
+    top_baseline_atc_rate_pct: formatPct(topEvidence?.baseline?.atc_rate == null ? null : topEvidence.baseline.atc_rate * 100),
     top_sessions_delta_pct_fmt: formatPct(topEvidence?.deltas?.sessions_delta_pct)
   };
 
   // --- Render output ---
   const summary = renderTemplate(templateObj.summary, templateContext);
   const details = Array.isArray(templateObj.details)
-    ? templateObj.details.map(line => renderTemplate(line, templateContext))
+    ? templateObj.details
+      .map((line) => renderTemplateDetail(line, templateContext))
+      .filter(Boolean)
     : [];
 
   const insight = {
@@ -166,6 +168,31 @@ function renderTemplate(str, ctx) {
     }
     return String(val);
   });
+}
+
+function renderTemplateDetail(str, ctx) {
+  if (!str || typeof str !== 'string') return '';
+
+  let hasUnknownToken = false;
+  const rendered = str.replace(/\{\{(\w+)\}\}/g, (_, key) => {
+    const val = ctx[key];
+    if (val === undefined || val === null) {
+      hasUnknownToken = true;
+      return '';
+    }
+    if (typeof val === 'number' && Number.isFinite(val)) {
+      return val.toFixed(2);
+    }
+    const normalized = String(val);
+    if (normalized.trim().toLowerCase() === 'unknown') {
+      hasUnknownToken = true;
+      return '';
+    }
+    return normalized;
+  });
+
+  if (hasUnknownToken) return '';
+  return rendered.trim();
 }
 
 function computeConfidence(metrics, evidence) {
