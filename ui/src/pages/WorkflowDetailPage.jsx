@@ -44,7 +44,7 @@ const SCHEDULE_WINDOW_MODES = {
   },
   day_to_date_vs_previous_day: {
     label: 'Today Until Scheduled Time vs Yesterday',
-    description: 'Current window is 00:00 to the scheduled run time; baseline is yesterday 00:00 to the same hour.'
+    description: 'Current window is 00:00 to the scheduled hour; baseline is yesterday 00:00 to the same hour. Minute offsets are ignored.'
   }
 };
 
@@ -115,10 +115,6 @@ export default function WorkflowDetailPage() {
   const currentTenant = tenants.find((tenant) => tenant.tenantId === tenantId);
   const schedulerTimeZone = currentTenant?.settings?.timezone || 'UTC';
 
-  const isTopOfHourCronExpr = (expr) => {
-    const minutePart = String(expr || '').trim().split(/\s+/)[0];
-    return minutePart === '0';
-  };
   const formatScheduleDate = (dateValue, timeZone) => {
     if (!dateValue) return '-';
     const date = new Date(dateValue);
@@ -154,14 +150,6 @@ export default function WorkflowDetailPage() {
       const cronExpr = scheduleMode === 'simple'
         ? SCHEDULE_PRESETS[selectedPreset].cronExpr
         : customCronExpr.trim();
-
-      if (
-        scheduleForm.windowMode === 'day_to_date_vs_previous_day'
-        && !isTopOfHourCronExpr(cronExpr)
-      ) {
-        toast.error('This window mode requires a top-of-hour cron expression. The minute field must be 0.');
-        return;
-      }
 
       await createSchedule.mutateAsync({
         name: scheduleForm.name.trim() || undefined,
@@ -403,9 +391,9 @@ export default function WorkflowDetailPage() {
                     <p className="text-xs text-gray-500 mt-2">
                       {SCHEDULE_PRESETS[selectedPreset].description} ({SCHEDULE_PRESETS[selectedPreset].cronExpr} {schedulerTimeZone})
                     </p>
-                    {scheduleForm.windowMode === 'day_to_date_vs_previous_day' && selectedPreset !== 'hourly' && (
+                    {scheduleForm.windowMode === 'day_to_date_vs_previous_day' && (
                       <p className="text-xs text-amber-700 mt-1">
-                        This window mode only works with top-of-hour schedules. Use `Hourly` or switch to advanced cron with minute `0`.
+                        Day-to-date analysis snaps to the scheduled hour. For example, a `09:03` run analyzes `00:00 → 09:00`.
                       </p>
                     )}
                   </div>
@@ -426,7 +414,7 @@ export default function WorkflowDetailPage() {
                     </p>
                     {scheduleForm.windowMode === 'day_to_date_vs_previous_day' && (
                       <p className="text-xs text-amber-700 mt-1">
-                        For this window mode, the minute field must be `0` so the run aligns to hourly data buckets.
+                        For this window mode, minute offsets are allowed. The analysis cutoff is floored to the hour.
                       </p>
                     )}
                   </div>

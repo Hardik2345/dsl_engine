@@ -2,7 +2,7 @@ const express = require('express');
 const WorkflowSchedule = require('../models/WorkflowSchedule');
 const MissedTrigger = require('../models/MissedTrigger');
 const { createSchedule, replayMissedTriggers } = require('../../scheduler/app/schedulerService');
-const { getNextRunAt, isTopOfHourCronExpr } = require('../../scheduler/app/cronUtils');
+const { getNextRunAt } = require('../../scheduler/app/cronUtils');
 const {
   SCHEDULE_WINDOW_MODES,
   SCHEDULE_WINDOW_MODE_VALUES
@@ -41,13 +41,6 @@ router.post('/:workflowId/schedules', async (req, res, next) => {
 
     if (!SCHEDULE_WINDOW_MODE_VALUES.includes(windowMode)) {
       return res.status(400).json({ error: `windowMode must be one of ${SCHEDULE_WINDOW_MODE_VALUES.join(', ')}` });
-    }
-
-    if (
-      windowMode === SCHEDULE_WINDOW_MODES.DAY_TO_DATE_VS_PREVIOUS_DAY
-      && !isTopOfHourCronExpr(cronExpr)
-    ) {
-      return res.status(400).json({ error: 'day_to_date_vs_previous_day requires a top-of-hour cron expression (minute must be 0)' });
     }
 
     const schedule = await createSchedule({
@@ -104,13 +97,6 @@ router.patch('/:workflowId/schedules/:scheduleId', async (req, res, next) => {
     const resolvedWindowMode = updates.windowMode || current.windowMode || SCHEDULE_WINDOW_MODES.PREVIOUS_COMPLETE_DAY;
     const resolvedCronExpr = updates.cronExpr || current.cronExpr;
     const resolvedTimeZone = updates.timezone || current.timezone || 'UTC';
-
-    if (
-      resolvedWindowMode === SCHEDULE_WINDOW_MODES.DAY_TO_DATE_VS_PREVIOUS_DAY
-      && !isTopOfHourCronExpr(resolvedCronExpr)
-    ) {
-      return res.status(400).json({ error: 'day_to_date_vs_previous_day requires a top-of-hour cron expression (minute must be 0)' });
-    }
 
     if (updates.cronExpr || updates.timezone) {
       updates.nextRunAt = getNextRunAt(resolvedCronExpr, new Date(), resolvedTimeZone);

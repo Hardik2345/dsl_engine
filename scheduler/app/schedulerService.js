@@ -130,6 +130,14 @@ function buildDayToDateVsPreviousDayContext(tenantId, triggerTime, payload = {},
   const triggerDate = new Date(triggerTime);
   const triggerParts = getTimeZoneParts(triggerDate, timeZone);
   const currentDayStart = startOfDay(triggerDate, timeZone);
+  const currentDayCutoff = localDateTimeToUtc({
+    year: triggerParts.year,
+    month: triggerParts.month,
+    day: triggerParts.day,
+    hour: triggerParts.hour,
+    minute: 0,
+    second: 0
+  }, timeZone);
   const previousDayStart = localDateTimeToUtc({
     year: triggerParts.year,
     month: triggerParts.month,
@@ -143,8 +151,8 @@ function buildDayToDateVsPreviousDayContext(tenantId, triggerTime, payload = {},
     month: triggerParts.month,
     day: triggerParts.day - 1,
     hour: triggerParts.hour,
-    minute: triggerParts.minute,
-    second: triggerParts.second
+    minute: 0,
+    second: 0
   }, timeZone);
 
   return {
@@ -154,7 +162,7 @@ function buildDayToDateVsPreviousDayContext(tenantId, triggerTime, payload = {},
       triggeredAt: toIsoUtc(triggerDate),
       window: {
         start: toIsoUtc(currentDayStart),
-        end: toIsoUtc(triggerDate)
+        end: toIsoUtc(currentDayCutoff)
       },
       baselineWindow: {
         start: toIsoUtc(previousDayStart),
