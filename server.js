@@ -1,8 +1,10 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const cookieParser = require('cookie-parser');
 require('dotenv').config();
 
+const authRoutes = require('./server/routes/auth');
 const workflowRoutes = require('./server/routes/workflows');
 const globalWorkflowRoutes = require('./server/routes/globalWorkflows');
 const runRoutes = require('./server/routes/runs');
@@ -38,6 +40,7 @@ app.use(cors({
 }));
 
 app.use(express.json({ limit: '2mb' }));
+app.use(cookieParser());
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
@@ -52,6 +55,7 @@ app.get('/version', (req, res) => {
   });
 });
 
+app.use('/auth', authRoutes);
 app.use('/tenants', tenantRoutes);
 app.use('/workflows/global', globalWorkflowRoutes);
 app.use('/tenants/:tenantId/workflows', workflowRoutes);

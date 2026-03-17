@@ -4,9 +4,11 @@ import {
   GitBranch, 
   Play, 
   Lightbulb,
-  Settings
+  Settings,
+  LogOut
 } from 'lucide-react';
 import clsx from 'clsx';
+import { useAuth } from '../context/AuthContext';
 
 const navItems = [
   { to: '/workflows', icon: GitBranch, label: 'Workflows' },
@@ -16,11 +18,13 @@ const navItems = [
 ];
 
 export default function Sidebar() {
+  const { logout } = useAuth();
+
   return (
     <aside className="w-64 bg-gray-900 text-white flex flex-col h-screen fixed left-0 top-0">
       {/* Logo */}
       <div className="h-16 flex items-center px-6 border-b border-gray-800">
-        <LayoutDashboard className="w-6 h-6 text-primary-400 mr-3" />
+        <LayoutDashboard className="w-4 h-4 text-primary-400 mr-2" />
         <span className="font-semibold text-lg">Workflow Engine</span>
       </div>
 
@@ -56,8 +60,15 @@ export default function Sidebar() {
       </nav>
 
       {/* Footer */}
-      <div className="px-6 py-4 border-t border-gray-800 text-xs text-gray-500">
-        DSL Engine v1.0
+      <div className="px-4 py-4 border-t border-gray-800 text-xs flex flex-col gap-2">
+        <button 
+          onClick={logout}
+          className="flex items-center text-red-400 hover:text-red-300 transition-colors text-sm font-medium py-1.5 px-3 rounded-md hover:bg-red-500/10"
+        >
+          <LogOut className="w-4 h-4 mr-2" />
+          Logout
+        </button>
+        <div className="text-gray-500 px-3">DSL Engine v1.0</div>
       </div>
     </aside>
   );

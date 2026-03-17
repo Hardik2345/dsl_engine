@@ -5,6 +5,8 @@ import { BrowserRouter } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import App from './App';
 import { TenantProvider } from './context/TenantContext';
+import { AuthProvider } from './context/AuthContext';
+import { GoogleOAuthProvider } from '@react-oauth/google';
 import './index.css';
 
 const queryClient = new QueryClient({
@@ -16,14 +18,20 @@ const queryClient = new QueryClient({
   },
 });
 
+const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || 'dummy-id';
+
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <TenantProvider>
-          <App />
-          <Toaster position="top-right" />
-        </TenantProvider>
+        <GoogleOAuthProvider clientId={googleClientId}>
+          <AuthProvider>
+            <TenantProvider>
+              <App />
+              <Toaster position="top-right" />
+            </TenantProvider>
+          </AuthProvider>
+        </GoogleOAuthProvider>
       </BrowserRouter>
     </QueryClientProvider>
   </React.StrictMode>
