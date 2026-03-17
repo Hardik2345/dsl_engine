@@ -18,12 +18,23 @@ const COOKIE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 const generateTokenAndSetCookie = (res, userId) => {
   const token = jwt.sign({ id: userId }, JWT_SECRET, { expiresIn: '7d' });
   
-  res.cookie('token', token, {
+  const isProd = process.env.NODE_ENV === 'production';
+  const secure = process.env.COOKIE_SECURE === 'true' || (isProd && process.env.COOKIE_SECURE !== 'false');
+  const sameSite = process.env.COOKIE_SAMESITE || 'lax'; // 'lax', 'strict', or 'none'
+  const domain = process.env.COOKIE_DOMAIN; // e.g. '.yourdomain.com'
+
+  const cookieOptions = {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production', // true in production
-    sameSite: 'lax',
+    secure,
+    sameSite,
     maxAge: COOKIE_MAX_AGE
-  });
+  };
+
+  if (domain) {
+    cookieOptions.domain = domain;
+  }
+
+  res.cookie('token', token, cookieOptions);
   
   return token;
 };

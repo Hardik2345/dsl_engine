@@ -16,6 +16,7 @@ const schedulerRoutes = require('./server/routes/scheduler');
 const alertsIngestRoutes = require('./server/routes/alertsIngest');
 
 const app = express();
+app.set('trust proxy', 1);
 
 // CORS configuration for UI
 const allowedOrigins = (process.env.UI_ORIGIN || 'http://localhost:5173')
