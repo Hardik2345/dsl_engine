@@ -14,25 +14,58 @@ const client = new OAuth2Client(GOOGLE_CLIENT_ID);
 // 1 Week Cookie Expiry: 7 days * 24 hours * 60 mins * 60 secs * 1000 ms
 const COOKIE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
-// Helper to generate token and set cookie
-const generateTokenAndSetCookie = (res, userId) => {
-  const token = jwt.sign({ id: userId }, JWT_SECRET, { expiresIn: '7d' });
-  
+const parseBoolean = (value) => {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string') return Boolean(value);
+
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'true') return true;
+  if (normalized === 'false') return false;
+  return undefined;
+};
+
+const buildCookieOptions = () => {
   const isProd = process.env.NODE_ENV === 'production';
-  const secure = process.env.COOKIE_SECURE === 'true' || (isProd && process.env.COOKIE_SECURE !== 'false');
-  const sameSite = process.env.COOKIE_SAMESITE || 'lax'; // 'lax', 'strict', or 'none'
-  const domain = process.env.COOKIE_DOMAIN; // e.g. '.yourdomain.com'
+  const configuredSecure = parseBoolean(process.env.COOKIE_SECURE);
+  const configuredSameSite = process.env.COOKIE_SAMESITE;
+  const domain = process.env.COOKIE_DOMAIN;
+
+  let sameSite = configuredSameSite || 'lax';
+  let secure = configuredSecure;
+
+  if (secure === undefined) {
+    secure = isProd;
+  }
+
+  // In production, default to SameSite=None for compatibility with split UI/API domains.
+  if (!configuredSameSite && isProd && secure) {
+    sameSite = 'none';
+  }
+
+  // Browsers reject SameSite=None cookies unless Secure=true.
+  if (sameSite === 'none' && !secure) {
+    sameSite = 'lax';
+  }
 
   const cookieOptions = {
     httpOnly: true,
     secure,
     sameSite,
-    maxAge: COOKIE_MAX_AGE
+    maxAge: COOKIE_MAX_AGE,
+    path: '/'
   };
 
   if (domain) {
     cookieOptions.domain = domain;
   }
+
+  return cookieOptions;
+};
+
+// Helper to generate token and set cookie
+const generateTokenAndSetCookie = (res, userId) => {
+  const token = jwt.sign({ id: userId }, JWT_SECRET, { expiresIn: '7d' });
+  const cookieOptions = buildCookieOptions();
 
   res.cookie('token', token, cookieOptions);
   
@@ -214,7 +247,13 @@ router.get('/me', async (req, res) => {
 // @route   POST /auth/logout
 // @desc    Logout and clear cookie
 router.post('/logout', (req, res) => {
-  res.clearCookie('token');
+  const cookieOptions = buildCookieOptions();
+  res.clearCookie('token', {
+    path: cookieOptions.path,
+    domain: cookieOptions.domain,
+    secure: cookieOptions.secure,
+    sameSite: cookieOptions.sameSite
+  });
   res.json({ message: 'Logged out successfully' });
 });
 
