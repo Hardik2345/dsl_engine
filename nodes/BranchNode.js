@@ -21,6 +21,38 @@ async function BranchNode(def, context) {
       matched: false 
     };
 
+    if (rule.filter_in_breakdowns) {
+      const filterResult = filterBreakdownEntries(rule.filter_in_breakdowns, breakdowns);
+      ruleEval.type = 'breakdown_filter';
+      ruleEval.breakdownMode = rule.filter_in_breakdowns.mode || 'any';
+      ruleEval.outputKey = rule.filter_in_breakdowns.write_matches_to || '';
+      ruleEval.matchedCount = filterResult.matches.length;
+      ruleEval.matched = filterResult.matches.length > 0;
+      ruleEvaluations.push(ruleEval);
+
+      if (filterResult.matches.length > 0) {
+        const firstMatch = filterResult.matches[0];
+        if (firstMatch) {
+          context.scratch = {
+            ...(context.scratch || {}),
+            matched_breakdown: firstMatch
+          };
+        }
+        return {
+          status: 'pass',
+          next: rule.then,
+          ruleEvaluations,
+          matchedRule: ruleIndex,
+          delta: {
+            breakdowns: {
+              [rule.filter_in_breakdowns.write_matches_to]: filterResult.matches
+            }
+          }
+        };
+      }
+      continue;
+    }
+
     if (rule.any_in_breakdowns || rule.all_in_breakdowns) {
       const breakdownConfig = rule.any_in_breakdowns || rule.all_in_breakdowns;
       const breakdownMode = rule.all_in_breakdowns ? 'all' : 'any';
@@ -133,6 +165,38 @@ async function BranchNode(def, context) {
 }
 
 module.exports = BranchNode;
+
+function filterBreakdownEntries(config, breakdowns = {}) {
+  const {
+    dimension,
+    conditions = [],
+    limit,
+    mode = 'any'
+  } = config || {};
+
+  if (!dimension || !Array.isArray(conditions) || conditions.length === 0) {
+    return { matches: [] };
+  }
+
+  const entries = Array.isArray(breakdowns?.[dimension]) ? breakdowns[dimension] : [];
+  const pool = typeof limit === 'number' ? entries.slice(0, limit) : entries;
+  if (!pool.length) {
+    return { matches: [] };
+  }
+
+  const matches = pool.filter((entry) => {
+    if (mode === 'all') {
+      return conditions.every((condition) => evaluate(resolveEntryMetric(entry, condition.metric), condition.op, condition.value));
+    }
+
+    return conditions.some((condition) => evaluate(resolveEntryMetric(entry, condition.metric), condition.op, condition.value));
+  }).map((entry) => ({
+    ...entry,
+    source_output_key: dimension
+  }));
+
+  return { matches };
+}
 
 function evaluateBreakdownRule(config, breakdowns = {}, mode = 'any') {
   const { dimension, conditions = [], limit } = config || {};

@@ -453,11 +453,18 @@ export default function PropertiesPanel({
             </datalist>
             <div className="text-sm font-medium text-gray-700">Rules</div>
             {(data.rules || []).map((rule, ruleIdx) => {
-               const breakdownRuleMode = rule.all_in_breakdowns ? 'all' : (rule.any_in_breakdowns ? 'any' : null);
-               const isBreakdownsRule = !!breakdownRuleMode;
+               const breakdownRuleType = rule.filter_in_breakdowns
+                 ? 'filter'
+                 : rule.all_in_breakdowns
+                   ? 'all'
+                   : rule.any_in_breakdowns
+                     ? 'any'
+                     : null;
+               const breakdownRuleMode = rule.filter_in_breakdowns?.mode || 'any';
+               const isBreakdownsRule = !!breakdownRuleType;
                const isOr = !isBreakdownsRule && rule.any && rule.any.length > 0;
                const ruleId = rule._ruleId || `legacy_rule_${ruleIdx}`;
-               const activeBreakdownRule = rule.any_in_breakdowns || rule.all_in_breakdowns || null;
+               const activeBreakdownRule = rule.filter_in_breakdowns || rule.any_in_breakdowns || rule.all_in_breakdowns || null;
                const currentList = isBreakdownsRule
                  ? (activeBreakdownRule?.conditions || [])
                  : (isOr ? rule.any : (rule.all || []));
@@ -469,13 +476,14 @@ export default function PropertiesPanel({
                        <div className="flex items-center gap-2">
                            <select
                                className="text-[10px] border border-gray-300 rounded px-2 py-0.5 bg-white"
-                               value={isBreakdownsRule ? 'breakdowns' : 'metrics'}
+                               value={breakdownRuleType === 'filter' ? 'breakdown_filter' : (isBreakdownsRule ? 'breakdowns' : 'metrics')}
                                onChange={(e) => {
                                   const mode = e.target.value;
                                   const newRules = [...data.rules];
                                   if (mode === 'breakdowns') {
                                     newRules[ruleIdx] = {
                                       ...newRules[ruleIdx],
+                                      filter_in_breakdowns: undefined,
                                       any_in_breakdowns: {
                                         dimension: activeBreakdownRule?.dimension || '',
                                         limit: activeBreakdownRule?.limit ?? '',
@@ -485,9 +493,25 @@ export default function PropertiesPanel({
                                       all: [],
                                       any: []
                                     };
+                                  } else if (mode === 'breakdown_filter') {
+                                    newRules[ruleIdx] = {
+                                      ...newRules[ruleIdx],
+                                      filter_in_breakdowns: {
+                                        dimension: activeBreakdownRule?.dimension || '',
+                                        limit: activeBreakdownRule?.limit ?? '',
+                                        mode: rule.filter_in_breakdowns?.mode || 'any',
+                                        write_matches_to: rule.filter_in_breakdowns?.write_matches_to || '',
+                                        conditions: activeBreakdownRule?.conditions || [{ metric: '', op: '>', value: '' }]
+                                      },
+                                      any_in_breakdowns: undefined,
+                                      all_in_breakdowns: undefined,
+                                      all: [],
+                                      any: []
+                                    };
                                   } else {
                                     newRules[ruleIdx] = {
                                       ...newRules[ruleIdx],
+                                      filter_in_breakdowns: undefined,
                                       any_in_breakdowns: undefined,
                                       all_in_breakdowns: undefined,
                                       all: (newRules[ruleIdx].all && newRules[ruleIdx].all.length)
@@ -501,6 +525,7 @@ export default function PropertiesPanel({
                            >
                                <option value="metrics">Metrics</option>
                                <option value="breakdowns">Breakdowns</option>
+                               <option value="breakdown_filter">Breakdown Filter</option>
                            </select>
                            <div className="flex bg-white rounded border border-gray-300 overflow-hidden">
                                <button 
@@ -545,75 +570,121 @@ export default function PropertiesPanel({
                     
                     <div className="space-y-2">
                        {isBreakdownsRule && (
-                         <div className="grid grid-cols-3 gap-2 mb-2">
-                           <div>
-                             <label className="block text-[10px] text-gray-500 mb-1">Match Mode</label>
-                             <select
-                               className="w-full border p-1 rounded"
-                               value={breakdownRuleMode || 'any'}
-                               onChange={(e) => {
-                                 const nextMode = e.target.value;
-                                 const newRules = [...data.rules];
-                                 const current = activeBreakdownRule || {};
-                                 const nextBreakdownRule = {
-                                   dimension: current.dimension || '',
-                                   limit: current.limit ?? '',
-                                   conditions: current.conditions || [{ metric: '', op: '>', value: '' }]
-                                 };
-                                 newRules[ruleIdx] = {
-                                   ...newRules[ruleIdx],
-                                   any_in_breakdowns: nextMode === 'any' ? nextBreakdownRule : undefined,
-                                   all_in_breakdowns: nextMode === 'all' ? nextBreakdownRule : undefined
-                                 };
-                                 handleChange('rules', newRules);
-                               }}
-                             >
-                               <option value="any">Any entry matches</option>
-                               <option value="all">All entries match</option>
-                             </select>
+                         <>
+                           <div className="grid grid-cols-3 gap-2 mb-2">
+                             <div>
+                               <label className="block text-[10px] text-gray-500 mb-1">
+                                 {breakdownRuleType === 'filter' ? 'Condition Mode' : 'Match Mode'}
+                               </label>
+                               {breakdownRuleType === 'filter' ? (
+                                 <select
+                                   className="w-full border p-1 rounded"
+                                   value={breakdownRuleMode}
+                                   onChange={(e) => {
+                                     const newRules = [...data.rules];
+                                     const current = activeBreakdownRule || {};
+                                     newRules[ruleIdx].filter_in_breakdowns = {
+                                       ...current,
+                                       mode: e.target.value
+                                     };
+                                     handleChange('rules', newRules);
+                                   }}
+                                 >
+                                   <option value="any">Any condition per entry</option>
+                                   <option value="all">All conditions per entry</option>
+                                 </select>
+                               ) : (
+                                 <select
+                                   className="w-full border p-1 rounded"
+                                   value={breakdownRuleType || 'any'}
+                                   onChange={(e) => {
+                                     const nextMode = e.target.value;
+                                     const newRules = [...data.rules];
+                                     const current = activeBreakdownRule || {};
+                                     const nextBreakdownRule = {
+                                       dimension: current.dimension || '',
+                                       limit: current.limit ?? '',
+                                       conditions: current.conditions || [{ metric: '', op: '>', value: '' }]
+                                     };
+                                     newRules[ruleIdx] = {
+                                       ...newRules[ruleIdx],
+                                       any_in_breakdowns: nextMode === 'any' ? nextBreakdownRule : undefined,
+                                       all_in_breakdowns: nextMode === 'all' ? nextBreakdownRule : undefined
+                                     };
+                                     handleChange('rules', newRules);
+                                   }}
+                                 >
+                                   <option value="any">Any entry matches</option>
+                                   <option value="all">All entries match</option>
+                                 </select>
+                               )}
+                             </div>
+                             <div>
+                               <label className="block text-[10px] text-gray-500 mb-1">Breakdown Key</label>
+                               <input
+                                 placeholder="sessions_product_drops"
+                                 className="w-full border p-1 rounded"
+                                 value={activeBreakdownRule?.dimension || ''}
+                                 onChange={(e) => {
+                                   const newRules = [...data.rules];
+                                   const current = activeBreakdownRule || {};
+                                   const nextRule = { ...current, dimension: e.target.value };
+                                   if (breakdownRuleType === 'filter') {
+                                     newRules[ruleIdx].filter_in_breakdowns = nextRule;
+                                   } else if (breakdownRuleType === 'all') {
+                                     newRules[ruleIdx].all_in_breakdowns = nextRule;
+                                   } else {
+                                     newRules[ruleIdx].any_in_breakdowns = nextRule;
+                                   }
+                                   handleChange('rules', newRules);
+                                 }}
+                               />
+                             </div>
+                             <div>
+                               <label className="block text-[10px] text-gray-500 mb-1">Top K</label>
+                               <input
+                                 type="number"
+                                 min="1"
+                                 placeholder="9"
+                                 className="w-full border p-1 rounded"
+                                 value={activeBreakdownRule?.limit ?? ''}
+                                 onChange={(e) => {
+                                   const newRules = [...data.rules];
+                                   const current = activeBreakdownRule || {};
+                                   const nextValue = e.target.value === '' ? '' : Number(e.target.value);
+                                   const nextRule = { ...current, limit: nextValue };
+                                   if (breakdownRuleType === 'filter') {
+                                     newRules[ruleIdx].filter_in_breakdowns = nextRule;
+                                   } else if (breakdownRuleType === 'all') {
+                                     newRules[ruleIdx].all_in_breakdowns = nextRule;
+                                   } else {
+                                     newRules[ruleIdx].any_in_breakdowns = nextRule;
+                                   }
+                                   handleChange('rules', newRules);
+                                 }}
+                               />
+                             </div>
                            </div>
-                           <div>
-                             <label className="block text-[10px] text-gray-500 mb-1">Breakdown Key</label>
-                             <input
-                               placeholder="sessions_product_drops"
-                               className="w-full border p-1 rounded"
-                               value={activeBreakdownRule?.dimension || ''}
-                               onChange={(e) => {
-                                 const newRules = [...data.rules];
-                                 const current = activeBreakdownRule || {};
-                                 const nextRule = { ...current, dimension: e.target.value };
-                                 if (breakdownRuleMode === 'all') {
-                                   newRules[ruleIdx].all_in_breakdowns = nextRule;
-                                 } else {
-                                   newRules[ruleIdx].any_in_breakdowns = nextRule;
-                                 }
-                                 handleChange('rules', newRules);
-                               }}
-                             />
-                           </div>
-                           <div>
-                             <label className="block text-[10px] text-gray-500 mb-1">Top K</label>
-                             <input
-                               type="number"
-                               min="1"
-                               placeholder="9"
-                               className="w-full border p-1 rounded"
-                               value={activeBreakdownRule?.limit ?? ''}
-                               onChange={(e) => {
-                                 const newRules = [...data.rules];
-                                 const current = activeBreakdownRule || {};
-                                 const nextValue = e.target.value === '' ? '' : Number(e.target.value);
-                                 const nextRule = { ...current, limit: nextValue };
-                                 if (breakdownRuleMode === 'all') {
-                                   newRules[ruleIdx].all_in_breakdowns = nextRule;
-                                 } else {
-                                   newRules[ruleIdx].any_in_breakdowns = nextRule;
-                                 }
-                                 handleChange('rules', newRules);
-                               }}
-                             />
-                           </div>
-                         </div>
+                           {breakdownRuleType === 'filter' && (
+                             <div className="mb-2">
+                               <label className="block text-[10px] text-gray-500 mb-1">Write Matches To</label>
+                               <OutputKeyInput
+                                 value={rule.filter_in_breakdowns?.write_matches_to || ''}
+                                 onChange={(nextValue) => {
+                                   const newRules = [...data.rules];
+                                   const current = activeBreakdownRule || {};
+                                   newRules[ruleIdx].filter_in_breakdowns = {
+                                     ...current,
+                                     write_matches_to: nextValue
+                                   };
+                                   handleChange('rules', newRules);
+                                 }}
+                                 placeholder="filtered_product_drops"
+                                 suggestions={Array.from(new Set(breakdownOutputKeySuggestions))}
+                               />
+                             </div>
+                           )}
+                         </>
                        )}
                        {currentList.map((cond, condIdx) => (
                            <div key={condIdx} className="flex gap-1 items-center">
@@ -627,7 +698,9 @@ export default function PropertiesPanel({
                                        const conditions = current.conditions || [];
                                        conditions[condIdx] = { ...conditions[condIdx], metric: e.target.value };
                                        const nextRule = { ...current, conditions };
-                                       if (breakdownRuleMode === 'all') {
+                                       if (breakdownRuleType === 'filter') {
+                                         newRules[ruleIdx].filter_in_breakdowns = nextRule;
+                                       } else if (breakdownRuleType === 'all') {
                                          newRules[ruleIdx].all_in_breakdowns = nextRule;
                                        } else {
                                          newRules[ruleIdx].any_in_breakdowns = nextRule;
@@ -655,7 +728,9 @@ export default function PropertiesPanel({
                                         const conditions = current.conditions || [];
                                         conditions[condIdx] = { ...conditions[condIdx], op: e.target.value };
                                         const nextRule = { ...current, conditions };
-                                        if (breakdownRuleMode === 'all') {
+                                        if (breakdownRuleType === 'filter') {
+                                          newRules[ruleIdx].filter_in_breakdowns = nextRule;
+                                        } else if (breakdownRuleType === 'all') {
                                           newRules[ruleIdx].all_in_breakdowns = nextRule;
                                         } else {
                                           newRules[ruleIdx].any_in_breakdowns = nextRule;
@@ -685,7 +760,9 @@ export default function PropertiesPanel({
                                          const conditions = current.conditions || [];
                                          conditions[condIdx] = { ...conditions[condIdx], value: e.target.value };
                                          const nextRule = { ...current, conditions };
-                                         if (breakdownRuleMode === 'all') {
+                                         if (breakdownRuleType === 'filter') {
+                                           newRules[ruleIdx].filter_in_breakdowns = nextRule;
+                                         } else if (breakdownRuleType === 'all') {
                                            newRules[ruleIdx].all_in_breakdowns = nextRule;
                                          } else {
                                            newRules[ruleIdx].any_in_breakdowns = nextRule;
@@ -705,7 +782,9 @@ export default function PropertiesPanel({
                                           const conditions = current.conditions || [];
                                           conditions.splice(condIdx, 1);
                                           const nextRule = { ...current, conditions };
-                                          if (breakdownRuleMode === 'all') {
+                                          if (breakdownRuleType === 'filter') {
+                                            newRules[ruleIdx].filter_in_breakdowns = nextRule;
+                                          } else if (breakdownRuleType === 'all') {
                                             newRules[ruleIdx].all_in_breakdowns = nextRule;
                                           } else {
                                             newRules[ruleIdx].any_in_breakdowns = nextRule;
@@ -730,7 +809,9 @@ export default function PropertiesPanel({
                                   const conditions = current.conditions || [];
                                   conditions.push({ metric: '', op: '>', value: '' });
                                   const nextRule = { ...current, conditions };
-                                  if (breakdownRuleMode === 'all') {
+                                  if (breakdownRuleType === 'filter') {
+                                    newRules[ruleIdx].filter_in_breakdowns = nextRule;
+                                  } else if (breakdownRuleType === 'all') {
                                     newRules[ruleIdx].all_in_breakdowns = nextRule;
                                   } else {
                                     newRules[ruleIdx].any_in_breakdowns = nextRule;

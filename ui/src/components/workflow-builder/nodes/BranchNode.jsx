@@ -9,7 +9,7 @@ export const BranchNode = ({ data, isConnectable }) => {
   const rules = data.rules || [];
 
   return (
-    <div className="w-[300px] bg-white border-2 border-purple-400 rounded-lg shadow-sm">
+    <div className="w-[340px] bg-white border-2 border-purple-400 rounded-lg shadow-sm">
       <div className="bg-purple-50 px-3 py-2 border-b border-purple-200 rounded-t-lg flex items-center gap-2">
         <GitFork className="w-4 h-4 text-purple-600" />
         <span className="text-sm font-medium text-purple-900">{data.id}</span>
@@ -21,28 +21,43 @@ export const BranchNode = ({ data, isConnectable }) => {
         {/* Render Handles for Rules */}
         {rules.map((rule, idx) => {
             const ruleId = ensureRuleId(rule, idx);
-            const isBreakdownsRule = !!rule.any_in_breakdowns;
+            const breakdownRule = rule.filter_in_breakdowns || rule.any_in_breakdowns || rule.all_in_breakdowns || null;
+            const breakdownLabel = rule.filter_in_breakdowns
+              ? 'FILTER'
+              : rule.all_in_breakdowns
+                ? 'ALL'
+                : rule.any_in_breakdowns
+                  ? 'ANY'
+                  : null;
+            const isBreakdownsRule = !!breakdownRule;
             const firstCondition = isBreakdownsRule
-              ? rule.any_in_breakdowns?.conditions?.[0]
+              ? breakdownRule?.conditions?.[0]
               : rule.all?.[0] || rule.any?.[0];
             const isOr = !isBreakdownsRule && rule.any && rule.any.length > 0;
             
             return (
-              <div key={ruleId} className="relative flex items-center justify-end bg-purple-50 p-2 rounded text-xs border border-purple-100">
-                <span className="mr-4 text-purple-800 font-mono flex items-center gap-1">
-                  <span className="font-bold mr-1">
-                    {isBreakdownsRule ? 'ANY' : (isOr ? 'OR' : 'AND')}
+              <div key={ruleId} className="relative flex items-center justify-end bg-purple-50 p-2 rounded text-xs border border-purple-100 overflow-hidden">
+                <span className="mr-4 min-w-0 max-w-[260px] text-purple-800 font-mono flex items-center gap-1 overflow-hidden whitespace-nowrap">
+                  <span className="font-bold mr-1 shrink-0">
+                    {isBreakdownsRule ? breakdownLabel : (isOr ? 'OR' : 'AND')}
                   </span>
                   {firstCondition ? (
                       <>
-                        {firstCondition.metric} {firstCondition.op} {firstCondition.value}
-                        {isBreakdownsRule && rule.any_in_breakdowns?.dimension && (
-                          <span className="text-[10px] text-purple-400 ml-1">
-                            in {rule.any_in_breakdowns.dimension}
+                        <span className="truncate">
+                          {firstCondition.metric} {firstCondition.op} {firstCondition.value}
+                        </span>
+                        {isBreakdownsRule && breakdownRule?.dimension && (
+                          <span className="text-[10px] text-purple-400 ml-1 shrink-0 truncate max-w-[88px]">
+                            in {breakdownRule.dimension}
+                          </span>
+                        )}
+                        {rule.filter_in_breakdowns?.write_matches_to && (
+                          <span className="text-[10px] text-purple-400 ml-1 shrink-0 truncate max-w-[88px]">
+                            {'->'} {rule.filter_in_breakdowns.write_matches_to}
                           </span>
                         )}
                         {!isBreakdownsRule && (rule.all?.length > 1 || rule.any?.length > 1) && (
-                          <span className="text-[10px] text-purple-400 ml-1">
+                          <span className="text-[10px] text-purple-400 ml-1 shrink-0">
                             (+{ (rule.all?.length || 0) + (rule.any?.length || 0) - 1 })
                           </span>
                         )}

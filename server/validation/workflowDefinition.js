@@ -105,11 +105,16 @@ function validateWorkflowDefinition(definition) {
         errors.push(`branch node ${node.id} must include rules`);
       } else {
         for (const rule of node.rules) {
-          if (rule.any_in_breakdowns && rule.all_in_breakdowns) {
-            errors.push(`branch node ${node.id} rule ${rule._ruleId || ''} cannot define both any_in_breakdowns and all_in_breakdowns`);
+          const breakdownRuleDefinitions = [
+            rule.any_in_breakdowns,
+            rule.all_in_breakdowns,
+            rule.filter_in_breakdowns
+          ].filter(Boolean);
+          if (breakdownRuleDefinitions.length > 1) {
+            errors.push(`branch node ${node.id} rule ${rule._ruleId || ''} cannot define more than one breakdown rule type`);
           }
 
-          const breakdownRule = rule.any_in_breakdowns || rule.all_in_breakdowns;
+          const breakdownRule = rule.any_in_breakdowns || rule.all_in_breakdowns || rule.filter_in_breakdowns;
           if (breakdownRule) {
             if (typeof breakdownRule.dimension !== 'string' || breakdownRule.dimension.trim() === '') {
               errors.push(`branch node ${node.id} has breakdown rule with invalid dimension/output key`);
@@ -122,6 +127,19 @@ function validateWorkflowDefinition(definition) {
               (!Number.isFinite(Number(breakdownRule.limit)) || Number(breakdownRule.limit) <= 0)
             ) {
               errors.push(`branch node ${node.id} has breakdown rule with invalid limit`);
+            }
+            if (
+              rule.filter_in_breakdowns &&
+              !['any', 'all'].includes(rule.filter_in_breakdowns.mode || 'any')
+            ) {
+              errors.push(`branch node ${node.id} has breakdown filter rule with invalid mode`);
+            }
+            if (
+              rule.filter_in_breakdowns &&
+              (typeof rule.filter_in_breakdowns.write_matches_to !== 'string'
+                || rule.filter_in_breakdowns.write_matches_to.trim() === '')
+            ) {
+              errors.push(`branch node ${node.id} has breakdown filter rule without write_matches_to`);
             }
           }
 
