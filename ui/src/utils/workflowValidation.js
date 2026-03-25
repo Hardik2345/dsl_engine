@@ -103,9 +103,42 @@ export function getPartialDayProductCompatibilityErrors(workflowJson) {
   return errors;
 }
 
+export function getPartialDayLandingPagePathCompatibilityErrors(workflowJson) {
+  if (!workflowJson || !Array.isArray(workflowJson.nodes)) return [];
+
+  const errors = [];
+
+  workflowJson.nodes.forEach((node) => {
+    if (node?.type !== 'recursive_dimension_breakdown') return;
+
+    const dimensions = getRecursiveDimensions(node);
+    if (!dimensions.length) return;
+
+    const reachableDepthCount = getReachableDepthCount(node, dimensions.length);
+    const landingPathIndex = dimensions.indexOf('landing_page_path');
+    if (landingPathIndex === -1 || landingPathIndex >= reachableDepthCount || landingPathIndex === 0) {
+      return;
+    }
+
+    const precedingDimensions = dimensions
+      .slice(0, landingPathIndex)
+      .filter((dimension) => dimension !== 'product_id');
+    if (!precedingDimensions.length) return;
+
+    errors.push(
+      `Node "${node.id}" cannot support partial-day landing page path analysis because landing_page_path appears after ${precedingDimensions.join(', ')}. Put landing_page_path first, only precede it with product_id, or reduce max depth below ${landingPathIndex + 1}.`
+    );
+  });
+
+  return errors;
+}
+
 export function getNodePartialDayProductWarnings(nodeData) {
   if (!nodeData || nodeData.type !== 'recursive_dimension_breakdown') return [];
-  return getPartialDayProductCompatibilityErrors({ nodes: [nodeData] });
+  return [
+    ...getPartialDayProductCompatibilityErrors({ nodes: [nodeData] }),
+    ...getPartialDayLandingPagePathCompatibilityErrors({ nodes: [nodeData] }),
+  ];
 }
 
 export function validateRunDateRanges({ windowStart, windowEnd, baselineStart, baselineEnd }) {

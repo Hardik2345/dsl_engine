@@ -7,6 +7,7 @@ import { useTenant } from '../context/TenantContext';
 import { Button } from './ui';
 import {
   getPartialDayProductCompatibilityErrors,
+  getPartialDayLandingPagePathCompatibilityErrors,
   isPartialDayWindow,
   validateRunDateRanges
 } from '../utils/workflowValidation';
@@ -95,7 +96,10 @@ export default function RunWorkflowModal({ workflow, onClose }) {
       || isPartialDayWindow(formData.baselineStart, formData.baselineEnd)
     );
     if (isPartialDayRun) {
-      const compatibilityErrors = getPartialDayProductCompatibilityErrors(workflowData?.version?.definitionJson);
+      const compatibilityErrors = [
+        ...getPartialDayProductCompatibilityErrors(workflowData?.version?.definitionJson),
+        ...getPartialDayLandingPagePathCompatibilityErrors(workflowData?.version?.definitionJson),
+      ];
       if (compatibilityErrors.length) {
         toast.error(compatibilityErrors[0]);
         return;

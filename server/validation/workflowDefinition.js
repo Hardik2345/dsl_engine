@@ -22,7 +22,8 @@ const ALLOWED_DIMENSIONS = new Set([
 
 const ALLOWED_OPS = new Set(['>', '>=', '<', '<=', '==', '!=']);
 const {
-  getPartialDayProductCompatibilityErrors
+  getPartialDayProductCompatibilityErrors,
+  getPartialDayLandingPagePathCompatibilityErrors
 } = require('./productPartialDayCompatibility');
 const { validateRecipients } = require('../services/emailService');
 
@@ -260,6 +261,7 @@ function validateWorkflowDefinition(definition) {
   }
 
   errors.push(...getPartialDayProductCompatibilityErrors(definition));
+  errors.push(...getPartialDayLandingPagePathCompatibilityErrors(definition));
 
   return { ok: errors.length === 0, errors };
 }

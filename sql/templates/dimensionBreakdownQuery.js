@@ -3,11 +3,12 @@
 const {
   isFullDayAlignedWindow,
   listHourlyProductUnsupportedFilters,
+  listHourlyLandingPagePathUnsupportedFilters,
   normalizeWindowForQuery
 } = require('../../lib/timeWindowUtils');
 
 const ALLOWED_DIMENSIONS = new Set([
-  "product_id",
+  'product_id',
   'utm_source',
   'utm_medium',
   'utm_campaign',
@@ -34,6 +35,7 @@ function buildFilterWhere(filters = []) {
   for (const f of filters) {
     if (!f?.dimension || f.value === undefined) continue;
     if (!ALLOWED_DIMENSIONS.has(f.dimension)) continue;
+
     if (Array.isArray(f.value)) {
       const values = Array.from(new Set(f.value.filter((value) => value !== undefined && value !== null && value !== '')));
       if (!values.length) continue;
@@ -66,6 +68,13 @@ function shouldUseHourlyProductRollup({ dimension, window, baselineWindow }) {
   return !(currentIsFullDay && baselineIsFullDay);
 }
 
+function shouldUseHourlyLandingPagePathAttribution({ dimension, window, baselineWindow }) {
+  if (dimension !== 'landing_page_path') return false;
+  const currentIsFullDay = isFullDayAlignedWindow(window?.start, window?.end);
+  const baselineIsFullDay = isFullDayAlignedWindow(baselineWindow?.start, baselineWindow?.end);
+  return !(currentIsFullDay && baselineIsFullDay);
+}
+
 function buildHourlyProductFilterWhere(filters = []) {
   const unsupportedDimensions = listHourlyProductUnsupportedFilters(filters);
   if (unsupportedDimensions.length) {
@@ -74,11 +83,27 @@ function buildHourlyProductFilterWhere(filters = []) {
     );
   }
 
+  return buildHourlyProductIdOnlyFilterWhere(filters);
+}
+
+function buildHourlyLandingPagePathFilterWhere(filters = []) {
+  const unsupportedDimensions = listHourlyLandingPagePathUnsupportedFilters(filters);
+  if (unsupportedDimensions.length) {
+    throw new Error(
+      `dimensionBreakdownQuery: hourly landing_page_path analysis does not support filters on ${Array.from(new Set(unsupportedDimensions)).join(', ')}`
+    );
+  }
+
+  return buildHourlyProductIdOnlyFilterWhere(filters);
+}
+
+function buildHourlyProductIdOnlyFilterWhere(filters = []) {
   const clauses = [];
   const params = [];
 
   for (const f of filters) {
     if (f?.dimension !== 'product_id' || f.value === undefined) continue;
+
     if (Array.isArray(f.value)) {
       const values = Array.from(new Set(f.value.filter((value) => value !== undefined && value !== null && value !== '')));
       if (!values.length) continue;
@@ -97,36 +122,8 @@ function buildHourlyProductFilterWhere(filters = []) {
   };
 }
 
-module.exports = function dimensionBreakdownQuery({
-  tenantId,
-  dimension,
-  window,
-  baselineWindow,
-  filters = [],
-  includeOrders = true
-}) {
-  if (!tenantId) throw new Error('dimensionBreakdownQuery: tenantId is required (db selector)');
-  if (!window?.start || !window?.end) throw new Error('dimensionBreakdownQuery: window.start/window.end required');
-  if (!baselineWindow?.start || !baselineWindow?.end) throw new Error('dimensionBreakdownQuery: baselineWindow.start/window.end required');
-
-  assertSafeDimension(dimension);
-
-  const useHourlyProductRollup = shouldUseHourlyProductRollup({ dimension, window, baselineWindow });
-  const { whereSql: filterSql, params: filterParams } = useHourlyProductRollup
-    ? buildHourlyProductFilterWhere(filters)
-    : buildFilterWhere(filters);
-  const notNullSql = buildNotNullFilter(dimension);
-  const normalizedWindow = normalizeWindowForQuery(window);
-  const normalizedBaselineWindow = normalizeWindowForQuery(baselineWindow);
-  const windowStart = normalizedWindow.start;
-  const windowEnd = normalizedWindow.end;
-  const baselineStart = normalizedBaselineWindow.start;
-  const baselineEnd = normalizedBaselineWindow.end;
-  const includeProductTitle = dimension === 'product_id';
-  const titleStart = baselineStart;
-  const titleEnd = windowEnd;
-
-  const sql = useHourlyProductRollup ? `
+function buildHourlyProductRollupSql({ filterSql, notNullSql, includeOrders }) {
+  return `
 WITH
 current_sessions AS (
   SELECT
@@ -209,7 +206,143 @@ LEFT JOIN baseline_sessions bs ON bs.dimension_value = k.dimension_value
 ${includeOrders ? 'LEFT JOIN current_orders co ON co.dimension_value = k.dimension_value\nLEFT JOIN baseline_orders bo ON bo.dimension_value = k.dimension_value' : ''}
 LEFT JOIN product_titles pt ON pt.dimension_value = k.dimension_value
 ORDER BY current_sessions DESC;
-  ` : `
+  `;
+}
+
+function buildHourlyLandingPagePathSql({ filterSql, includeOrders }) {
+  return `
+WITH
+current_path_product_sessions AS (
+  SELECT
+    landing_page_path AS dimension_value,
+    product_id,
+    COALESCE(SUM(sessions), 0) AS sessions,
+    COALESCE(SUM(sessions_with_cart_additions), 0) AS atc_sessions
+  FROM hourly_product_sessions
+  WHERE CONCAT(date, ' ', LPAD(hour, 2, '0'), ':00:00') >= ?
+    AND CONCAT(date, ' ', LPAD(hour, 2, '0'), ':00:00') <  ?
+    ${filterSql}
+    AND product_id IS NOT NULL
+  GROUP BY landing_page_path, product_id
+),
+baseline_path_product_sessions AS (
+  SELECT
+    landing_page_path AS dimension_value,
+    product_id,
+    COALESCE(SUM(sessions), 0) AS sessions,
+    COALESCE(SUM(sessions_with_cart_additions), 0) AS atc_sessions
+  FROM hourly_product_sessions
+  WHERE CONCAT(date, ' ', LPAD(hour, 2, '0'), ':00:00') >= ?
+    AND CONCAT(date, ' ', LPAD(hour, 2, '0'), ':00:00') <  ?
+    ${filterSql}
+    AND product_id IS NOT NULL
+  GROUP BY landing_page_path, product_id
+),
+current_product_session_totals AS (
+  SELECT product_id, SUM(sessions) AS total_sessions
+  FROM current_path_product_sessions
+  GROUP BY product_id
+),
+baseline_product_session_totals AS (
+  SELECT product_id, SUM(sessions) AS total_sessions
+  FROM baseline_path_product_sessions
+  GROUP BY product_id
+),${includeOrders ? `
+current_product_orders AS (
+  SELECT
+    product_id,
+    COALESCE(COUNT(DISTINCT order_name), 0) AS orders
+  FROM shopify_orders
+  WHERE created_at >= ?
+    AND created_at <  ?
+    ${filterSql}
+    AND product_id IS NOT NULL
+  GROUP BY product_id
+),
+baseline_product_orders AS (
+  SELECT
+    product_id,
+    COALESCE(COUNT(DISTINCT order_name), 0) AS orders
+  FROM shopify_orders
+  WHERE created_at >= ?
+    AND created_at <  ?
+    ${filterSql}
+    AND product_id IS NOT NULL
+  GROUP BY product_id
+),
+current_allocated_orders AS (
+  SELECT
+    cps.dimension_value,
+    SUM(
+      CASE
+        WHEN cst.total_sessions > 0
+          THEN COALESCE(cpo.orders, 0) * (cps.sessions / cst.total_sessions)
+        ELSE 0
+      END
+    ) AS orders
+  FROM current_path_product_sessions cps
+  LEFT JOIN current_product_session_totals cst ON cst.product_id = cps.product_id
+  LEFT JOIN current_product_orders cpo ON cpo.product_id = cps.product_id
+  GROUP BY cps.dimension_value
+),
+baseline_allocated_orders AS (
+  SELECT
+    bps.dimension_value,
+    SUM(
+      CASE
+        WHEN bst.total_sessions > 0
+          THEN COALESCE(bpo.orders, 0) * (bps.sessions / bst.total_sessions)
+        ELSE 0
+      END
+    ) AS orders
+  FROM baseline_path_product_sessions bps
+  LEFT JOIN baseline_product_session_totals bst ON bst.product_id = bps.product_id
+  LEFT JOIN baseline_product_orders bpo ON bpo.product_id = bps.product_id
+  GROUP BY bps.dimension_value
+),` : ''}
+current_path_metrics AS (
+  SELECT
+    dimension_value,
+    COALESCE(SUM(sessions), 0) AS sessions,
+    COALESCE(SUM(atc_sessions), 0) AS atc_sessions
+  FROM current_path_product_sessions
+  GROUP BY dimension_value
+),
+baseline_path_metrics AS (
+  SELECT
+    dimension_value,
+    COALESCE(SUM(sessions), 0) AS sessions,
+    COALESCE(SUM(atc_sessions), 0) AS atc_sessions
+  FROM baseline_path_product_sessions
+  GROUP BY dimension_value
+),
+all_keys AS (
+  SELECT dimension_value FROM current_path_metrics
+  UNION
+  SELECT dimension_value FROM baseline_path_metrics
+  ${includeOrders ? `
+  UNION
+  SELECT dimension_value FROM current_allocated_orders
+  UNION
+  SELECT dimension_value FROM baseline_allocated_orders` : ''}
+)
+SELECT
+  k.dimension_value,
+  COALESCE(cm.sessions, 0) AS current_sessions,
+  COALESCE(bm.sessions, 0) AS baseline_sessions,
+  COALESCE(cm.atc_sessions, 0) AS current_atc_sessions,
+  COALESCE(bm.atc_sessions, 0) AS baseline_atc_sessions,
+  ${includeOrders ? 'COALESCE(cao.orders, 0) AS current_orders,\n  COALESCE(bao.orders, 0) AS baseline_orders' : '0 AS current_orders,\n  0 AS baseline_orders'}
+FROM all_keys k
+LEFT JOIN current_path_metrics cm ON cm.dimension_value = k.dimension_value
+LEFT JOIN baseline_path_metrics bm ON bm.dimension_value = k.dimension_value
+${includeOrders ? 'LEFT JOIN current_allocated_orders cao ON cao.dimension_value = k.dimension_value\nLEFT JOIN baseline_allocated_orders bao ON bao.dimension_value = k.dimension_value' : ''}
+ORDER BY current_sessions DESC;
+  `;
+}
+
+function buildDefaultDimensionSql({ dimension, filterSql, notNullSql, includeOrders, includeProductTitle }) {
+  return `
 WITH
 current_sessions AS (
   SELECT
@@ -278,15 +411,11 @@ all_keys AS (
 )
 SELECT
   k.dimension_value,
-
   COALESCE(cs.sessions, 0) AS current_sessions,
   COALESCE(bs.sessions, 0) AS baseline_sessions,
-
   COALESCE(cs.atc_sessions, 0) AS current_atc_sessions,
   COALESCE(bs.atc_sessions, 0) AS baseline_atc_sessions,
-
   ${includeOrders ? 'COALESCE(co.orders, 0) AS current_orders,\n  COALESCE(bo.orders, 0) AS baseline_orders' : '0 AS current_orders,\n  0 AS baseline_orders'}${includeProductTitle ? ',\n  pt.product_title' : ''}
-
 FROM all_keys k
 LEFT JOIN current_sessions cs ON cs.dimension_value = k.dimension_value
 LEFT JOIN baseline_sessions bs ON bs.dimension_value = k.dimension_value
@@ -294,6 +423,46 @@ ${includeOrders ? 'LEFT JOIN current_orders co ON co.dimension_value = k.dimensi
 ${includeProductTitle ? 'LEFT JOIN product_titles pt ON pt.dimension_value = k.dimension_value' : ''}
 ORDER BY current_sessions DESC;
   `;
+}
+
+module.exports = function dimensionBreakdownQuery({
+  tenantId,
+  dimension,
+  window,
+  baselineWindow,
+  filters = [],
+  includeOrders = true
+}) {
+  if (!tenantId) throw new Error('dimensionBreakdownQuery: tenantId is required (db selector)');
+  if (!window?.start || !window?.end) throw new Error('dimensionBreakdownQuery: window.start/window.end required');
+  if (!baselineWindow?.start || !baselineWindow?.end) throw new Error('dimensionBreakdownQuery: baselineWindow.start/window.end required');
+
+  assertSafeDimension(dimension);
+
+  const useHourlyProductRollup = shouldUseHourlyProductRollup({ dimension, window, baselineWindow });
+  const useHourlyLandingPagePathAttribution = shouldUseHourlyLandingPagePathAttribution({ dimension, window, baselineWindow });
+  const { whereSql: filterSql, params: filterParams } = useHourlyProductRollup
+    ? buildHourlyProductFilterWhere(filters)
+    : useHourlyLandingPagePathAttribution
+      ? buildHourlyLandingPagePathFilterWhere(filters)
+      : buildFilterWhere(filters);
+
+  const notNullSql = buildNotNullFilter(dimension);
+  const normalizedWindow = normalizeWindowForQuery(window);
+  const normalizedBaselineWindow = normalizeWindowForQuery(baselineWindow);
+  const windowStart = normalizedWindow.start;
+  const windowEnd = normalizedWindow.end;
+  const baselineStart = normalizedBaselineWindow.start;
+  const baselineEnd = normalizedBaselineWindow.end;
+  const includeProductTitle = dimension === 'product_id';
+  const titleStart = baselineStart;
+  const titleEnd = windowEnd;
+
+  const sql = useHourlyProductRollup
+    ? buildHourlyProductRollupSql({ filterSql, notNullSql, includeOrders })
+    : useHourlyLandingPagePathAttribution
+      ? buildHourlyLandingPagePathSql({ filterSql, includeOrders })
+      : buildDefaultDimensionSql({ dimension, filterSql, notNullSql, includeOrders, includeProductTitle });
 
   const params = useHourlyProductRollup ? [
     windowStart, windowEnd,
@@ -312,6 +481,20 @@ ORDER BY current_sessions DESC;
 
     titleStart, titleEnd,
     ...filterParams
+  ] : useHourlyLandingPagePathAttribution ? [
+    windowStart, windowEnd,
+    ...filterParams,
+
+    baselineStart, baselineEnd,
+    ...filterParams,
+
+    ...(includeOrders ? [
+      windowStart, windowEnd,
+      ...filterParams,
+
+      baselineStart, baselineEnd,
+      ...filterParams
+    ] : [])
   ] : [
     windowStart, windowEnd,
     ...filterParams,
@@ -332,7 +515,7 @@ ORDER BY current_sessions DESC;
     sql,
     params,
     meta: {
-      tenantId, // db selector
+      tenantId,
       type: 'dimension_breakdown',
       dimension
     }
