@@ -460,9 +460,17 @@ export default function PropertiesPanel({
                    : rule.any_in_breakdowns
                      ? 'any'
                      : null;
-               const breakdownRuleMode = rule.filter_in_breakdowns?.mode || 'any';
+               const breakdownEntryLogic = breakdownRuleType === 'filter'
+                 ? (rule.filter_in_breakdowns?.entry_logic
+                   || (rule.filter_in_breakdowns?.mode === 'all' ? 'and' : 'or'))
+                 : ((rule.any_in_breakdowns || rule.all_in_breakdowns)?.entry_logic || 'and');
+               const filterEntryLogic = rule.filter_in_breakdowns?.entry_logic
+                 || (rule.filter_in_breakdowns?.mode === 'all' ? 'and' : 'or');
+               const filterMatchScope = rule.filter_in_breakdowns?.match_scope || 'any';
                const isBreakdownsRule = !!breakdownRuleType;
-               const isOr = !isBreakdownsRule && rule.any && rule.any.length > 0;
+               const isOr = isBreakdownsRule
+                 ? breakdownEntryLogic === 'or'
+                 : (rule.any && rule.any.length > 0);
                const ruleId = rule._ruleId || `legacy_rule_${ruleIdx}`;
                const activeBreakdownRule = rule.filter_in_breakdowns || rule.any_in_breakdowns || rule.all_in_breakdowns || null;
                const currentList = isBreakdownsRule
@@ -487,6 +495,7 @@ export default function PropertiesPanel({
                                       any_in_breakdowns: {
                                         dimension: activeBreakdownRule?.dimension || '',
                                         limit: activeBreakdownRule?.limit ?? '',
+                                        entry_logic: breakdownEntryLogic,
                                         conditions: activeBreakdownRule?.conditions || [{ metric: '', op: '>', value: '' }]
                                       },
                                       all_in_breakdowns: undefined,
@@ -498,8 +507,10 @@ export default function PropertiesPanel({
                                       ...newRules[ruleIdx],
                                       filter_in_breakdowns: {
                                         dimension: activeBreakdownRule?.dimension || '',
-                                        limit: activeBreakdownRule?.limit ?? '',
-                                        mode: rule.filter_in_breakdowns?.mode || 'any',
+                                       limit: activeBreakdownRule?.limit ?? '',
+                                       mode: rule.filter_in_breakdowns?.mode || 'any',
+                                        entry_logic: breakdownEntryLogic,
+                                        match_scope: rule.filter_in_breakdowns?.match_scope || 'any',
                                         write_matches_to: rule.filter_in_breakdowns?.write_matches_to || '',
                                         conditions: activeBreakdownRule?.conditions || [{ metric: '', op: '>', value: '' }]
                                       },
@@ -531,26 +542,42 @@ export default function PropertiesPanel({
                                <button 
                                    className={`px-2 py-0.5 text-[10px] ${!isOr ? 'bg-purple-100 text-purple-700 font-bold' : 'text-gray-500 hover:bg-gray-50'}`}
                                    onClick={() => {
-                                       if (isBreakdownsRule) return;
                                        const newRules = [...data.rules];
-                                       // Switch to AND: move content to 'all', clear 'any'
-                                       if (isOr) {
+                                       if (isBreakdownsRule) {
+                                           const current = activeBreakdownRule || {};
+                                           const nextRule = { ...current, entry_logic: 'and' };
+                                           if (breakdownRuleType === 'filter') {
+                                             newRules[ruleIdx].filter_in_breakdowns = nextRule;
+                                           } else if (breakdownRuleType === 'all') {
+                                             newRules[ruleIdx].all_in_breakdowns = nextRule;
+                                           } else {
+                                             newRules[ruleIdx].any_in_breakdowns = nextRule;
+                                           }
+                                       } else if (isOr) {
                                            newRules[ruleIdx] = { ...newRules[ruleIdx], all: rule.any, any: [] };
-                                           handleChange('rules', newRules);
                                        }
+                                       handleChange('rules', newRules);
                                    }}
                                >AND</button>
                                <div className="w-px bg-gray-300"></div>
                                <button 
                                   className={`px-2 py-0.5 text-[10px] ${isOr ? 'bg-purple-100 text-purple-700 font-bold' : 'text-gray-500 hover:bg-gray-50'}`}
                                   onClick={() => {
-                                       if (isBreakdownsRule) return;
                                        const newRules = [...data.rules];
-                                       // Switch to OR: move content to 'any', clear 'all'
-                                       if (!isOr) {
+                                       if (isBreakdownsRule) {
+                                           const current = activeBreakdownRule || {};
+                                           const nextRule = { ...current, entry_logic: 'or' };
+                                           if (breakdownRuleType === 'filter') {
+                                             newRules[ruleIdx].filter_in_breakdowns = nextRule;
+                                           } else if (breakdownRuleType === 'all') {
+                                             newRules[ruleIdx].all_in_breakdowns = nextRule;
+                                           } else {
+                                             newRules[ruleIdx].any_in_breakdowns = nextRule;
+                                           }
+                                       } else if (!isOr) {
                                            newRules[ruleIdx] = { ...newRules[ruleIdx], any: rule.all || [], all: [] };
-                                           handleChange('rules', newRules);
                                        }
+                                       handleChange('rules', newRules);
                                   }}
                                >OR</button>
                            </div>
@@ -571,29 +598,12 @@ export default function PropertiesPanel({
                     <div className="space-y-2">
                        {isBreakdownsRule && (
                          <>
-                           <div className="grid grid-cols-3 gap-2 mb-2">
+                           <div className={`grid gap-2 mb-2 ${breakdownRuleType === 'filter' ? 'grid-cols-3' : 'grid-cols-3'}`}>
                              <div>
                                <label className="block text-[10px] text-gray-500 mb-1">
-                                 {breakdownRuleType === 'filter' ? 'Condition Mode' : 'Match Mode'}
+                                 {breakdownRuleType === 'filter' ? 'Match Scope' : 'Match Mode'}
                                </label>
-                               {breakdownRuleType === 'filter' ? (
-                                 <select
-                                   className="w-full border p-1 rounded"
-                                   value={breakdownRuleMode}
-                                   onChange={(e) => {
-                                     const newRules = [...data.rules];
-                                     const current = activeBreakdownRule || {};
-                                     newRules[ruleIdx].filter_in_breakdowns = {
-                                       ...current,
-                                       mode: e.target.value
-                                     };
-                                     handleChange('rules', newRules);
-                                   }}
-                                 >
-                                   <option value="any">Any condition per entry</option>
-                                   <option value="all">All conditions per entry</option>
-                                 </select>
-                               ) : (
+                               {breakdownRuleType !== 'filter' ? (
                                  <select
                                    className="w-full border p-1 rounded"
                                    value={breakdownRuleType || 'any'}
@@ -604,12 +614,30 @@ export default function PropertiesPanel({
                                      const nextBreakdownRule = {
                                        dimension: current.dimension || '',
                                        limit: current.limit ?? '',
+                                       entry_logic: breakdownEntryLogic,
                                        conditions: current.conditions || [{ metric: '', op: '>', value: '' }]
                                      };
                                      newRules[ruleIdx] = {
                                        ...newRules[ruleIdx],
                                        any_in_breakdowns: nextMode === 'any' ? nextBreakdownRule : undefined,
                                        all_in_breakdowns: nextMode === 'all' ? nextBreakdownRule : undefined
+                                     };
+                                     handleChange('rules', newRules);
+                                   }}
+                                 >
+                                   <option value="any">Any entry matches</option>
+                                   <option value="all">All entries match</option>
+                                 </select>
+                               ) : (
+                                 <select
+                                   className="w-full border p-1 rounded"
+                                   value={filterMatchScope}
+                                   onChange={(e) => {
+                                     const newRules = [...data.rules];
+                                     const current = activeBreakdownRule || {};
+                                     newRules[ruleIdx].filter_in_breakdowns = {
+                                       ...current,
+                                       match_scope: e.target.value
                                      };
                                      handleChange('rules', newRules);
                                    }}

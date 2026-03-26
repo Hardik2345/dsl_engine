@@ -129,10 +129,28 @@ function validateWorkflowDefinition(definition) {
               errors.push(`branch node ${node.id} has breakdown rule with invalid limit`);
             }
             if (
+              (rule.any_in_breakdowns || rule.all_in_breakdowns)?.entry_logic !== undefined &&
+              !['and', 'or'].includes((rule.any_in_breakdowns || rule.all_in_breakdowns).entry_logic)
+            ) {
+              errors.push(`branch node ${node.id} has breakdown rule with invalid entry_logic`);
+            }
+            if (
               rule.filter_in_breakdowns &&
               !['any', 'all'].includes(rule.filter_in_breakdowns.mode || 'any')
             ) {
               errors.push(`branch node ${node.id} has breakdown filter rule with invalid mode`);
+            }
+            if (
+              rule.filter_in_breakdowns?.entry_logic !== undefined &&
+              !['and', 'or'].includes(rule.filter_in_breakdowns.entry_logic)
+            ) {
+              errors.push(`branch node ${node.id} has breakdown filter rule with invalid entry_logic`);
+            }
+            if (
+              rule.filter_in_breakdowns?.match_scope !== undefined &&
+              !['any', 'all'].includes(rule.filter_in_breakdowns.match_scope)
+            ) {
+              errors.push(`branch node ${node.id} has breakdown filter rule with invalid match_scope`);
             }
             if (
               rule.filter_in_breakdowns &&

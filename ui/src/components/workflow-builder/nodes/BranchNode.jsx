@@ -29,6 +29,9 @@ export const BranchNode = ({ data, isConnectable }) => {
                 : rule.any_in_breakdowns
                   ? 'ANY'
                   : null;
+            const breakdownEntryLogic = rule.filter_in_breakdowns
+              ? (rule.filter_in_breakdowns.entry_logic || (rule.filter_in_breakdowns.mode === 'all' ? 'and' : 'or'))
+              : ((rule.any_in_breakdowns || rule.all_in_breakdowns)?.entry_logic || 'and');
             const isBreakdownsRule = !!breakdownRule;
             const firstCondition = isBreakdownsRule
               ? breakdownRule?.conditions?.[0]
@@ -49,6 +52,11 @@ export const BranchNode = ({ data, isConnectable }) => {
                         {isBreakdownsRule && breakdownRule?.dimension && (
                           <span className="text-[10px] text-purple-400 ml-1 shrink-0 truncate max-w-[88px]">
                             in {breakdownRule.dimension}
+                          </span>
+                        )}
+                        {isBreakdownsRule && (
+                          <span className="text-[10px] text-purple-400 ml-1 shrink-0">
+                            {breakdownEntryLogic.toUpperCase()}
                           </span>
                         )}
                         {rule.filter_in_breakdowns?.write_matches_to && (

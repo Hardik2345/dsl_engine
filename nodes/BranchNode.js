@@ -24,13 +24,15 @@ async function BranchNode(def, context) {
     if (rule.filter_in_breakdowns) {
       const filterResult = filterBreakdownEntries(rule.filter_in_breakdowns, breakdowns);
       ruleEval.type = 'breakdown_filter';
-      ruleEval.breakdownMode = rule.filter_in_breakdowns.mode || 'any';
+      ruleEval.entryLogic = getEntryLogic(rule.filter_in_breakdowns);
+      ruleEval.matchScope = getMatchScope(rule.filter_in_breakdowns);
       ruleEval.outputKey = rule.filter_in_breakdowns.write_matches_to || '';
       ruleEval.matchedCount = filterResult.matches.length;
-      ruleEval.matched = filterResult.matches.length > 0;
+      ruleEval.poolCount = filterResult.poolCount;
+      ruleEval.matched = filterResult.passed;
       ruleEvaluations.push(ruleEval);
 
-      if (filterResult.matches.length > 0) {
+      if (filterResult.passed) {
         const firstMatch = filterResult.matches[0];
         if (firstMatch) {
           context.scratch = {
@@ -58,6 +60,7 @@ async function BranchNode(def, context) {
       const breakdownMode = rule.all_in_breakdowns ? 'all' : 'any';
       const matchedEntry = evaluateBreakdownRule(breakdownConfig, breakdowns, breakdownMode);
       ruleEval.type = 'breakdown';
+      ruleEval.entryLogic = getBreakdownEntryLogic(breakdownConfig);
       ruleEval.breakdownMode = breakdownMode;
       ruleEval.matched = !!matchedEntry;
       ruleEvaluations.push(ruleEval);
@@ -170,22 +173,23 @@ function filterBreakdownEntries(config, breakdowns = {}) {
   const {
     dimension,
     conditions = [],
-    limit,
-    mode = 'any'
+    limit
   } = config || {};
 
   if (!dimension || !Array.isArray(conditions) || conditions.length === 0) {
-    return { matches: [] };
+    return { matches: [], passed: false, poolCount: 0 };
   }
 
   const entries = Array.isArray(breakdowns?.[dimension]) ? breakdowns[dimension] : [];
   const pool = typeof limit === 'number' ? entries.slice(0, limit) : entries;
+  const entryLogic = getEntryLogic(config);
+  const matchScope = getMatchScope(config);
   if (!pool.length) {
-    return { matches: [] };
+    return { matches: [], passed: false, poolCount: 0 };
   }
 
   const matches = pool.filter((entry) => {
-    if (mode === 'all') {
+    if (entryLogic === 'and') {
       return conditions.every((condition) => evaluate(resolveEntryMetric(entry, condition.metric), condition.op, condition.value));
     }
 
@@ -195,7 +199,31 @@ function filterBreakdownEntries(config, breakdowns = {}) {
     source_output_key: dimension
   }));
 
-  return { matches };
+  const passed = matchScope === 'all'
+    ? matches.length === pool.length
+    : matches.length > 0;
+
+  return {
+    matches,
+    passed,
+    poolCount: pool.length
+  };
+}
+
+function getEntryLogic(config = {}) {
+  if (config.entry_logic === 'and' || config.entry_logic === 'or') {
+    return config.entry_logic;
+  }
+
+  return config.mode === 'all' ? 'and' : 'or';
+}
+
+function getMatchScope(config = {}) {
+  return config.match_scope === 'all' ? 'all' : 'any';
+}
+
+function getBreakdownEntryLogic(config = {}) {
+  return config.entry_logic === 'or' ? 'or' : 'and';
 }
 
 function evaluateBreakdownRule(config, breakdowns = {}, mode = 'any') {
@@ -206,19 +234,15 @@ function evaluateBreakdownRule(config, breakdowns = {}, mode = 'any') {
 
   const entries = Array.isArray(breakdowns?.[dimension]) ? breakdowns[dimension] : [];
   const pool = typeof limit === 'number' ? entries.slice(0, limit) : entries;
+  const entryLogic = getBreakdownEntryLogic(config);
   if (pool.length === 0) return false;
 
   for (const entry of pool) {
-    let allMatched = true;
-    for (const condition of conditions) {
-      const metricValue = resolveEntryMetric(entry, condition.metric);
-      if (!evaluate(metricValue, condition.op, condition.value)) {
-        allMatched = false;
-        break;
-      }
-    }
+    const entryMatched = entryLogic === 'or'
+      ? conditions.some((condition) => evaluate(resolveEntryMetric(entry, condition.metric), condition.op, condition.value))
+      : conditions.every((condition) => evaluate(resolveEntryMetric(entry, condition.metric), condition.op, condition.value));
 
-    if (allMatched) {
+    if (entryMatched) {
       if (mode === 'any') {
         return {
           ...entry,
