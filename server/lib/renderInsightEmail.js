@@ -131,7 +131,7 @@ function renderInsightEmail({ insight, workflowId, workflowName, brandName, subj
     ? insight.details.filter((detail) => {
         if (detail === undefined || detail === null) return false;
         if (typeof detail === 'object' && !Array.isArray(detail)) {
-          return String(detail.title || '').trim() !== '' || (Array.isArray(detail.items) && detail.items.length > 0);
+          return String(detail.title || '').trim() !== '' || Array.isArray(detail.items);
         }
         return String(detail).trim() !== '';
       })

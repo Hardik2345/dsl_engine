@@ -41,12 +41,12 @@ function validateInsightDetailItem(detail, nodeId, errors, index) {
     errors.push(`insight node ${nodeId} detail ${index + 1} must include a non-empty title`);
   }
 
-  if (!Array.isArray(detail.items) || detail.items.length === 0) {
-    errors.push(`insight node ${nodeId} detail ${index + 1} must include a non-empty items array`);
+  if (detail.items !== undefined && !Array.isArray(detail.items)) {
+    errors.push(`insight node ${nodeId} detail ${index + 1} items must be an array when provided`);
     return;
   }
 
-  detail.items.forEach((item, itemIndex) => {
+  (detail.items || []).forEach((item, itemIndex) => {
     if (typeof item !== 'string' || item.trim() === '') {
       errors.push(`insight node ${nodeId} detail ${index + 1} item ${itemIndex + 1} must be a non-empty string`);
     }

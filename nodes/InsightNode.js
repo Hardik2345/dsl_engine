@@ -217,7 +217,7 @@ function renderTemplateDetailEntry(entry, ctx) {
       .filter(Boolean)
     : [];
 
-  if (!title || !items.length) {
+  if (!title) {
     return null;
   }
 
