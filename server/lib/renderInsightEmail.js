@@ -17,14 +17,29 @@ function getValueColor(value) {
   return '#059669';
 }
 
-function renderDetailCard(detail, index) {
-  const lines = String(detail || '')
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean);
+function colorizeNumericText(value) {
+  const escaped = escapeHtml(String(value ?? ''));
+  const NUMBER_RE = /(^|[\s([{>])([+-]?\d+(?:\.\d+)?%?)(?=$|[\s)\]}<,.:;!?])/g;
 
-  const title = lines[0] || '';
-  const metricLines = lines.slice(1);
+  return escaped.replace(NUMBER_RE, (match, prefix, token) => {
+    if (!token || token.startsWith('+0') || token === '0' || token === '0%' || token === '0.00' || token === '0.00%') {
+      return `${prefix}${token}`;
+    }
+
+    const numeric = Number(String(token).replace(/%$/, ''));
+    if (Number.isNaN(numeric) || numeric === 0) {
+      return `${prefix}${token}`;
+    }
+
+    const color = numeric > 0 ? '#059669' : '#dc2626';
+    return `${prefix}<span style="color:${color} !important;-webkit-text-fill-color:${color};font-weight:700;">${token}</span>`;
+  });
+}
+
+function renderDetailCard(detail, index) {
+  const parsed = normalizeDetail(detail);
+  const title = parsed.title;
+  const metricLines = parsed.items;
   const metricRows = metricLines
     .map((line) => {
       const separatorIndex = line.indexOf(':');
@@ -68,7 +83,7 @@ function renderDetailCard(detail, index) {
             ` : ''}
             ${looseLines.length ? `
               <div style="margin-top:${metricRows.length ? '4px' : '12px'};font-size:14px;line-height:1.6;color:#334155;white-space:pre-wrap;">
-                ${escapeHtmlPreserveBreaks(looseLines.join('\n'))}
+                ${colorizeNumericText(looseLines.join('\n')).replace(/\n/g, '<br />')}
               </div>
             ` : ''}
           </td>
@@ -78,10 +93,48 @@ function renderDetailCard(detail, index) {
   `;
 }
 
+function normalizeDetail(detail) {
+  if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
+    const title = String(detail.title || '').trim();
+    const items = Array.isArray(detail.items)
+      ? detail.items.map((item) => String(item || '').trim()).filter(Boolean)
+      : [];
+    return { title, items };
+  }
+
+  const lines = String(detail || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  return {
+    title: lines[0] || '',
+    items: lines.slice(1)
+  };
+}
+
+function detailToText(detail) {
+  if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
+    const title = String(detail.title || '').trim();
+    const items = Array.isArray(detail.items)
+      ? detail.items.map((item) => String(item || '').trim()).filter(Boolean)
+      : [];
+    return [title, ...items].filter(Boolean).join('\n');
+  }
+
+  return String(detail || '').trim();
+}
+
 function renderInsightEmail({ insight, workflowId, workflowName, brandName, subjectTemplate, tenantId }) {
   const summary = insight?.summary || 'Insight generated';
   const details = Array.isArray(insight?.details)
-    ? insight.details.filter((detail) => detail !== undefined && detail !== null && String(detail).trim() !== '')
+    ? insight.details.filter((detail) => {
+        if (detail === undefined || detail === null) return false;
+        if (typeof detail === 'object' && !Array.isArray(detail)) {
+          return String(detail.title || '').trim() !== '' || (Array.isArray(detail.items) && detail.items.length > 0);
+        }
+        return String(detail).trim() !== '';
+      })
     : [];
   const confidence = insight?.confidence;
   const confidencePct = confidence == null || Number.isNaN(Number(confidence))
@@ -152,7 +205,7 @@ function renderInsightEmail({ insight, workflowId, workflowName, brandName, subj
       <div style="padding:28px;">
         <div style="padding:22px 24px;border-radius:18px;background-color:#0f172a;background-image:linear-gradient(135deg, #0f172a 0%, #172554 100%);border:1px solid #1e3a8a;box-shadow:inset 0 1px 0 rgba(255,255,255,0.04);color:#f8fafc !important;-webkit-text-fill-color:#f8fafc;">
           <div style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#bfdbfe !important;-webkit-text-fill-color:#bfdbfe;margin-bottom:10px;">Key Takeaway</div>
-          <div style="font-size:24px;line-height:1.3;font-weight:750;color:#f8fafc !important;-webkit-text-fill-color:#f8fafc;white-space:pre-wrap;letter-spacing:-0.02em;text-shadow:0 1px 1px rgba(0,0,0,0.12);">${escapeHtml(summary)}</div>
+          <div style="font-size:24px;line-height:1.3;font-weight:750;color:#f8fafc !important;-webkit-text-fill-color:#f8fafc;white-space:pre-wrap;letter-spacing:-0.02em;text-shadow:0 1px 1px rgba(0,0,0,0.12);">${colorizeNumericText(summary)}</div>
         </div>
         <div style="margin-top:18px;">
           ${confidenceHtml}
@@ -174,7 +227,7 @@ function renderInsightEmail({ insight, workflowId, workflowName, brandName, subj
     `Summary: ${summary}`,
     details.length ? '' : null,
     details.length ? 'Details:' : null,
-    ...details.map((detail, index) => `${index + 1}. ${detail}`),
+    ...details.map((detail, index) => `${index + 1}. ${detailToText(detail)}`),
     confidencePct ? '' : null,
     confidencePct ? `Confidence: ${confidencePct}` : null,
   ].filter(Boolean);

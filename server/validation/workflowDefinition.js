@@ -27,6 +27,32 @@ const {
 } = require('./productPartialDayCompatibility');
 const { validateRecipients } = require('../services/emailService');
 
+function validateInsightDetailItem(detail, nodeId, errors, index) {
+  if (typeof detail === 'string') {
+    return;
+  }
+
+  if (!detail || typeof detail !== 'object' || Array.isArray(detail)) {
+    errors.push(`insight node ${nodeId} detail ${index + 1} must be a string or object`);
+    return;
+  }
+
+  if (typeof detail.title !== 'string' || detail.title.trim() === '') {
+    errors.push(`insight node ${nodeId} detail ${index + 1} must include a non-empty title`);
+  }
+
+  if (!Array.isArray(detail.items) || detail.items.length === 0) {
+    errors.push(`insight node ${nodeId} detail ${index + 1} must include a non-empty items array`);
+    return;
+  }
+
+  detail.items.forEach((item, itemIndex) => {
+    if (typeof item !== 'string' || item.trim() === '') {
+      errors.push(`insight node ${nodeId} detail ${index + 1} item ${itemIndex + 1} must be a non-empty string`);
+    }
+  });
+}
+
 function validateWorkflowDefinition(definition) {
   const errors = [];
 
@@ -259,6 +285,18 @@ function validateWorkflowDefinition(definition) {
     if (node.type === 'insight') {
       if (!node.template || (typeof node.template !== 'object' && typeof node.template !== 'string')) {
         errors.push(`insight node ${node.id} must include template`);
+      }
+      if (
+        node.template
+        && typeof node.template === 'object'
+        && node.template !== null
+        && node.template.details !== undefined
+      ) {
+        if (!Array.isArray(node.template.details)) {
+          errors.push(`insight node ${node.id} template.details must be an array when provided`);
+        } else {
+          node.template.details.forEach((detail, index) => validateInsightDetailItem(detail, node.id, errors, index));
+        }
       }
       if (
         node.output_key !== undefined &&

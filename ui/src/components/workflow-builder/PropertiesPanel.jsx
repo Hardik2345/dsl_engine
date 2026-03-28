@@ -1397,38 +1397,124 @@ export default function PropertiesPanel({
                          <div>
                             <label className="block text-xs font-medium text-gray-500 mb-1">Details (List)</label>
                             {(data.template.details || []).map((detail, idx) => (
-                                <div key={idx} className="flex gap-2 mb-2">
-                                    <TokenTextarea
-                                        className="w-full border p-1 rounded text-xs min-h-[40px]"
-                                        value={detail}
-                                        onChange={(nextValue) => {
+                                typeof detail === 'object' && detail !== null && !Array.isArray(detail) ? (
+                                  <div key={idx} className="border rounded-md p-3 mb-3 bg-gray-50 space-y-3">
+                                    <div className="flex items-start gap-2">
+                                      <div className="flex-1">
+                                        <label className="block text-[11px] font-medium text-gray-500 mb-1">Detail Title</label>
+                                        <TokenTextarea
+                                          className="w-full border p-1 rounded text-xs min-h-[40px] bg-white"
+                                          value={detail.title || ''}
+                                          onChange={(nextValue) => {
                                             const newDetails = [...(data.template.details || [])];
-                                            newDetails[idx] = nextValue;
+                                            newDetails[idx] = { ...(detail || {}), title: nextValue };
                                             handleChange('template', { ...data.template, details: newDetails });
-                                        }}
-                                        tokenSuggestions={mergedInsightTokens}
-                                    />
-                                    <button 
+                                          }}
+                                          placeholder="{{top1_value}}"
+                                          tokenSuggestions={mergedInsightTokens}
+                                        />
+                                      </div>
+                                      <button
                                         onClick={() => {
-                                            const newDetails = [...(data.template.details || [])];
-                                            newDetails.splice(idx, 1);
-                                            handleChange('template', { ...data.template, details: newDetails });
+                                          const newDetails = [...(data.template.details || [])];
+                                          newDetails.splice(idx, 1);
+                                          handleChange('template', { ...data.template, details: newDetails });
                                         }}
                                         className="p-1 h-fit hover:bg-red-50 text-red-500 rounded"
-                                    >
+                                      >
                                         <Trash2 className="w-4 h-4" />
-                                    </button>
-                                </div>
+                                      </button>
+                                    </div>
+
+                                    <div>
+                                      <label className="block text-[11px] font-medium text-gray-500 mb-1">Detail Items</label>
+                                      {(detail.items || []).map((item, itemIdx) => (
+                                        <div key={itemIdx} className="flex gap-2 mb-2">
+                                          <TokenTextarea
+                                            className="w-full border p-2 rounded text-xs min-h-[72px] bg-white"
+                                            value={item}
+                                            onChange={(nextValue) => {
+                                              const newDetails = [...(data.template.details || [])];
+                                              const nextItems = [...(detail.items || [])];
+                                              nextItems[itemIdx] = nextValue;
+                                              newDetails[idx] = { ...(detail || {}), items: nextItems };
+                                              handleChange('template', { ...data.template, details: newDetails });
+                                            }}
+                                            placeholder="Sessions Delta: {{top1_sessions_delta_pct_fmt}}"
+                                            tokenSuggestions={mergedInsightTokens}
+                                          />
+                                          <button
+                                            onClick={() => {
+                                              const newDetails = [...(data.template.details || [])];
+                                              const nextItems = [...(detail.items || [])];
+                                              nextItems.splice(itemIdx, 1);
+                                              newDetails[idx] = { ...(detail || {}), items: nextItems };
+                                              handleChange('template', { ...data.template, details: newDetails });
+                                            }}
+                                            className="p-1 h-fit hover:bg-red-50 text-red-500 rounded"
+                                          >
+                                            <Trash2 className="w-4 h-4" />
+                                          </button>
+                                        </div>
+                                      ))}
+                                      <button
+                                        onClick={() => {
+                                          const newDetails = [...(data.template.details || [])];
+                                          const nextItems = [...(detail.items || []), ''];
+                                          newDetails[idx] = { ...(detail || {}), items: nextItems };
+                                          handleChange('template', { ...data.template, details: newDetails });
+                                        }}
+                                        className="text-blue-600 text-xs hover:underline flex items-center gap-1"
+                                      >
+                                        <Plus className="w-3 h-3" /> Add Detail Item
+                                      </button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div key={idx} className="flex gap-2 mb-2">
+                                      <TokenTextarea
+                                          className="w-full border p-1 rounded text-xs min-h-[40px]"
+                                          value={detail}
+                                          onChange={(nextValue) => {
+                                              const newDetails = [...(data.template.details || [])];
+                                              newDetails[idx] = nextValue;
+                                              handleChange('template', { ...data.template, details: newDetails });
+                                          }}
+                                          tokenSuggestions={mergedInsightTokens}
+                                      />
+                                      <button 
+                                          onClick={() => {
+                                              const newDetails = [...(data.template.details || [])];
+                                              newDetails.splice(idx, 1);
+                                              handleChange('template', { ...data.template, details: newDetails });
+                                          }}
+                                          className="p-1 h-fit hover:bg-red-50 text-red-500 rounded"
+                                      >
+                                          <Trash2 className="w-4 h-4" />
+                                      </button>
+                                  </div>
+                                )
                             ))}
-                            <button 
-                                onClick={() => {
-                                    const newDetails = [...(data.template.details || []), ''];
-                                    handleChange('template', { ...data.template, details: newDetails });
-                                }}
-                                className="text-blue-600 text-xs hover:underline flex items-center gap-1"
-                            >
-                                <Plus className="w-3 h-3" /> Add Detail Line
-                            </button>
+                            <div className="flex gap-4">
+                              <button 
+                                  onClick={() => {
+                                      const newDetails = [...(data.template.details || []), ''];
+                                      handleChange('template', { ...data.template, details: newDetails });
+                                  }}
+                                  className="text-blue-600 text-xs hover:underline flex items-center gap-1"
+                              >
+                                  <Plus className="w-3 h-3" /> Add Legacy Detail
+                              </button>
+                              <button 
+                                  onClick={() => {
+                                      const newDetails = [...(data.template.details || []), { title: '', items: [''] }];
+                                      handleChange('template', { ...data.template, details: newDetails });
+                                  }}
+                                  className="text-blue-600 text-xs hover:underline flex items-center gap-1"
+                              >
+                                  <Plus className="w-3 h-3" /> Add Detail Card
+                              </button>
+                            </div>
                          </div>
 
                          <div>

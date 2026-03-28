@@ -5,6 +5,7 @@ const {
   formatDisplayValue,
   formatDimensionLabel,
   makeEvidenceKey,
+  formatEvidencePath,
 } = require('../server/lib/insightUtils');
 const { renderInsightEmail } = require('../server/lib/renderInsightEmail');
 const { sendEmail } = require('../server/services/emailService');
@@ -74,6 +75,11 @@ async function InsightNode(def, context) {
     dimension: topEvidence?.dimension,
     dimension_label: formatDimensionLabel(topEvidence?.dimension),
     value: formatDisplayValue(topEvidence),
+    parent_dimension: topEvidence?.parent?.dimension,
+    parent_dimension_label: formatDimensionLabel(topEvidence?.parent?.dimension),
+    parent_value: topEvidence?.parent?.display_value ?? topEvidence?.parent?.value,
+    evidence_path: formatEvidencePath(topEvidence),
+    evidence_path_labels: formatEvidencePath(topEvidence, { includeLabels: true }),
     ...topEvidenceTokens,
     confidence_score: computeConfidence(metrics, topEvidence),
     cvr_delta_pct_fmt: formatPct(metrics.cvr_delta_pct),
@@ -101,7 +107,7 @@ async function InsightNode(def, context) {
   const summary = renderTemplate(templateObj.summary, templateContext);
   const details = Array.isArray(templateObj.details)
     ? templateObj.details
-      .map((line) => renderTemplateDetail(line, templateContext))
+      .map((line) => renderTemplateDetailEntry(line, templateContext))
       .filter(Boolean)
     : [];
 
@@ -193,6 +199,32 @@ function renderTemplateDetail(str, ctx) {
 
   if (hasUnknownToken) return '';
   return rendered.trim();
+}
+
+function renderTemplateDetailEntry(entry, ctx) {
+  if (typeof entry === 'string') {
+    return renderTemplateDetail(entry, ctx);
+  }
+
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+    return null;
+  }
+
+  const title = renderTemplateDetail(entry.title, ctx);
+  const items = Array.isArray(entry.items)
+    ? entry.items
+      .map((item) => renderTemplateDetail(item, ctx))
+      .filter(Boolean)
+    : [];
+
+  if (!title || !items.length) {
+    return null;
+  }
+
+  return {
+    title,
+    items
+  };
 }
 
 function computeConfidence(metrics, evidence) {

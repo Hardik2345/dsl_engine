@@ -5,6 +5,18 @@ import { Card, PageSpinner, EmptyState, Badge } from '../components/ui';
 import { format } from 'date-fns';
 import { Link } from 'react-router-dom';
 
+function formatInsightDetail(detail) {
+  if (typeof detail === 'string') return detail;
+  if (!detail || typeof detail !== 'object' || Array.isArray(detail)) return String(detail || '');
+
+  const title = String(detail.title || '').trim();
+  const items = Array.isArray(detail.items)
+    ? detail.items.map((item) => String(item || '').trim()).filter(Boolean)
+    : [];
+
+  return [title, ...items].filter(Boolean).join(' | ');
+}
+
 export default function InsightsPage() {
   const { tenantId } = useTenant();
   const { data: insights, isLoading, error } = useInsights();
@@ -53,7 +65,7 @@ export default function InsightsPage() {
                   {insight.details?.length > 0 && (
                     <ul className="text-sm text-gray-600 ml-7 space-y-1">
                       {insight.details.slice(0, 3).map((detail, idx) => (
-                        <li key={idx}>• {detail}</li>
+                        <li key={idx}>• {formatInsightDetail(detail)}</li>
                       ))}
                       {insight.details.length > 3 && (
                         <li className="text-gray-400">

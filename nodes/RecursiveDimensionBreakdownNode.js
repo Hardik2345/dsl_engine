@@ -89,7 +89,7 @@ async function RecursiveDimensionBreakdownNode(def, context) {
    * Internal recursive function
    * Recursion axis: filters + depth
    */
-  async function recurse(activeFilters, depth) {
+  async function recurse(activeFilters, depth, ancestry = []) {
     if (depth >= max_depth) return;
     if (depth >= dimensionList.length) return;
 
@@ -296,11 +296,23 @@ async function RecursiveDimensionBreakdownNode(def, context) {
           ? product_title
           : dimension_value;
 
+      const currentPath = [
+        ...ancestry,
+        {
+          dimension: activeDimension,
+          value: dimension_value,
+          display_value: displayValue
+        }
+      ];
+
       candidates.push({
         dimension: activeDimension,
         value: dimension_value,
         display_value: displayValue,
         depth,
+        ancestry: ancestry.map((item) => ({ ...item })),
+        parent: ancestry.length ? { ...ancestry[ancestry.length - 1] } : null,
+        path: currentPath,
         current: {
           orders: current_orders,
           sessions: current_sessions,
@@ -394,17 +406,25 @@ async function RecursiveDimensionBreakdownNode(def, context) {
 
       await recurse(
         [...activeFilters, { dimension: activeDimension, value: entry.value }],
-        depth + 1
+        depth + 1,
+        entry.path || ancestry
       );
     }
   }
 
   // Kick off recursion
-  await recurse(filters, 0);
+  await recurse(filters, 0, []);
 
   const mergedEvidenceMap = new Map();
   for (const entry of evidence) {
-    const key = `${entry.dimension}::${entry.value}::${entry.depth}`;
+    const key = JSON.stringify({
+      dimension: entry.dimension,
+      value: entry.value,
+      depth: entry.depth,
+      path: Array.isArray(entry.path)
+        ? entry.path.map((item) => [item.dimension, item.value])
+        : []
+    });
     const existing = mergedEvidenceMap.get(key);
     if (!existing || entry.sessionShare > existing.sessionShare) {
       mergedEvidenceMap.set(key, entry);
