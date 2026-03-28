@@ -19,9 +19,14 @@ export default function RunWorkflowModal({ workflow, onClose }) {
   const { data: workflowData } = useWorkflow(workflow.workflowId);
 
   const now = new Date();
-  const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-  const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-  const weekAgoYesterday = new Date(weekAgo.getTime() - 24 * 60 * 60 * 1000);
+  const startOfLocalDay = (date) => {
+    const next = new Date(date);
+    next.setHours(0, 0, 0, 0);
+    return next;
+  };
+  const todayStart = startOfLocalDay(now);
+  const yesterdayStart = new Date(todayStart.getTime() - 24 * 60 * 60 * 1000);
+  const dayBeforeYesterdayStart = new Date(todayStart.getTime() - 2 * 24 * 60 * 60 * 1000);
 
   const formatDateForInput = (date) => {
     // Offset manual calculation to preserve local time (IST) in ISO format
@@ -34,10 +39,10 @@ export default function RunWorkflowModal({ workflow, onClose }) {
   };
 
   const [formData, setFormData] = useState({
-    windowStart: formatDateForInput(yesterday),
-    windowEnd: formatDateForInput(now),
-    baselineStart: formatDateForInput(weekAgoYesterday),
-    baselineEnd: formatDateForInput(weekAgo),
+    windowStart: formatDateForInput(yesterdayStart),
+    windowEnd: formatDateForInput(todayStart),
+    baselineStart: formatDateForInput(dayBeforeYesterdayStart),
+    baselineEnd: formatDateForInput(yesterdayStart),
   });
 
   const [usePreviousPeriod, setUsePreviousPeriod] = useState(false);
