@@ -55,11 +55,11 @@ function renderDetailCard(detail, index) {
   const looseLines = metricLines.filter((line) => !line.includes(':'));
 
   return `
-    <div style="margin-bottom:12px;padding:18px 20px;border:1px solid #d9e1ec;border-radius:16px;background:#f8fafc;">
+    <div style="margin-bottom:12px;padding:18px 20px;border:1px solid #d9e1ec;border-radius:4px;background:#f8fafc;">
       <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse:collapse;">
         <tr>
           <td valign="top" style="width:40px;padding-right:14px;">
-            <div style="width:32px;height:32px;border-radius:999px;background:#dbeafe;color:#1d4ed8;font-size:14px;font-weight:800;line-height:32px;text-align:center;font-variant-numeric:tabular-nums;">
+            <div style="width:32px;height:32px;border-radius:4px;background:#dbeafe;color:#1d4ed8;font-size:14px;font-weight:800;line-height:32px;text-align:center;font-variant-numeric:tabular-nums;">
               ${index + 1}
             </div>
           </td>
@@ -158,7 +158,7 @@ function renderInsightEmail({ insight, workflowId, workflowName, brandName, subj
 
   const confidenceHtml = confidencePct
     ? `
-      <div style="display:inline-block;padding:0;border-radius:16px;background:#ecfdf5;border:1px solid #a7f3d0;overflow:hidden;">
+      <div style="display:inline-block;padding:0;border-radius:4px;background:#ecfdf5;border:1px solid #a7f3d0;overflow:hidden;">
         <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">
           <tr>
             <td style="padding:11px 14px 10px 16px;font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#047857;white-space:nowrap;border-right:1px solid rgba(16, 185, 129, 0.18);">
@@ -181,7 +181,7 @@ function renderInsightEmail({ insight, workflowId, workflowName, brandName, subj
     <meta name="supported-color-schemes" content="light only">
   </head>
   <body style="margin:0;padding:28px;background:#eef2f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#111827;">
-    <div style="max-width:720px;margin:0 auto;background:#ffffff;border:1px solid #dbe3ee;border-radius:22px;overflow:hidden;box-shadow:0 10px 30px rgba(15, 23, 42, 0.08);">
+    <div style="max-width:720px;margin:0 auto;background:#ffffff;border:1px solid #dbe3ee;border-radius:4px;overflow:hidden;box-shadow:0 10px 30px rgba(15, 23, 42, 0.08);">
       <div style="padding:24px 28px;background-color:#0f172a;background-image:linear-gradient(135deg, #0f172a 0%, #1e293b 100%);color:#ffffff !important;-webkit-text-fill-color:#ffffff;">
         <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse:collapse;">
           <tr>
@@ -195,7 +195,7 @@ function renderInsightEmail({ insight, workflowId, workflowName, brandName, subj
             </div>
             </td>
             <td valign="top" align="right" style="width:1%;white-space:nowrap;">
-              <div style="display:inline-block;padding:8px 14px;border-radius:999px;background-color:#334155;color:#ffffff !important;-webkit-text-fill-color:#ffffff;font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;">
+              <div style="display:inline-block;padding:8px 14px;border-radius:4px;background-color:#334155;color:#ffffff !important;-webkit-text-fill-color:#ffffff;font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;">
                 Alert Summary
               </div>
             </td>
@@ -203,7 +203,7 @@ function renderInsightEmail({ insight, workflowId, workflowName, brandName, subj
         </table>
       </div>
       <div style="padding:28px;">
-        <div style="padding:22px 24px;border-radius:18px;background-color:#0f172a;background-image:linear-gradient(135deg, #0f172a 0%, #172554 100%);border:1px solid #1e3a8a;box-shadow:inset 0 1px 0 rgba(255,255,255,0.04);color:#f8fafc !important;-webkit-text-fill-color:#f8fafc;">
+        <div style="padding:22px 24px;border-radius:4px;background-color:#0f172a;background-image:linear-gradient(135deg, #0f172a 0%, #172554 100%);border:1px solid #1e3a8a;box-shadow:inset 0 1px 0 rgba(255,255,255,0.04);color:#f8fafc !important;-webkit-text-fill-color:#f8fafc;">
           <div style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#bfdbfe !important;-webkit-text-fill-color:#bfdbfe;margin-bottom:10px;">Key Takeaway</div>
           <div style="font-size:24px;line-height:1.3;font-weight:750;color:#f8fafc !important;-webkit-text-fill-color:#f8fafc;white-space:pre-wrap;letter-spacing:-0.02em;text-shadow:0 1px 1px rgba(0,0,0,0.12);">${colorizeNumericText(summary)}</div>
         </div>
