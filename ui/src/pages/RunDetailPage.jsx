@@ -54,6 +54,25 @@ export default function RunDetailPage() {
     if (text.length <= max) return text;
     return `${text.slice(0, max - 1)}…`;
   };
+  const renderStructuredInsightDetail = (detail, idx) => {
+    const title = String(detail?.title || '').trim();
+    const items = Array.isArray(detail?.items)
+      ? detail.items.map((item) => String(item || '').trim()).filter(Boolean)
+      : [];
+
+    return (
+      <li key={idx} className="text-xs text-primary-800">
+        {title && <div className="font-medium">{truncate(title, 200)}</div>}
+        {items.length > 0 && (
+          <ul className="list-disc list-inside ml-4 mt-1 space-y-0.5">
+            {items.map((item, itemIdx) => (
+              <li key={itemIdx}>{truncate(item, 220)}</li>
+            ))}
+          </ul>
+        )}
+      </li>
+    );
+  };
   const renderRankedList = (text) => {
     if (!text || typeof text !== 'string') return null;
     const lines = text.split('\n').filter(Boolean);
@@ -341,12 +360,8 @@ export default function RunDetailPage() {
                 {finalInsight.details && finalInsight.details.length > 0 && (
                    <ul className="list-disc list-inside space-y-1 mb-3">
                       {finalInsight.details.map((detail, idx) => {
-                        if (typeof detail !== 'string') {
-                          return (
-                            <li key={idx} className="text-xs text-primary-800">
-                              {String(detail)}
-                            </li>
-                          );
+                        if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
+                          return renderStructuredInsightDetail(detail, idx);
                         }
 
                         const lines = detail.split('\n').filter(Boolean);
