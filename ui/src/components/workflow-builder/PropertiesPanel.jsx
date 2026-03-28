@@ -1417,6 +1417,21 @@ export default function PropertiesPanel({
                                       <button
                                         onClick={() => {
                                           const newDetails = [...(data.template.details || [])];
+                                          const clonedDetail = {
+                                            ...(detail || {}),
+                                            items: Array.isArray(detail.items) ? [...detail.items] : []
+                                          };
+                                          newDetails.splice(idx + 1, 0, clonedDetail);
+                                          handleChange('template', { ...data.template, details: newDetails });
+                                        }}
+                                        className="p-1 h-fit hover:bg-blue-50 text-blue-600 rounded"
+                                        title="Duplicate detail card"
+                                      >
+                                        <Plus className="w-4 h-4" />
+                                      </button>
+                                      <button
+                                        onClick={() => {
+                                          const newDetails = [...(data.template.details || [])];
                                           newDetails.splice(idx, 1);
                                           handleChange('template', { ...data.template, details: newDetails });
                                         }}
