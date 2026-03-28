@@ -395,6 +395,19 @@ export default function PropertiesPanel({
     setEmailRecipientsInput(formatEmailRecipients(selectedNode?.data?.email?.to));
   }, [selectedNode?.id]);
 
+  const bumpTopTokenVersion = (value) => {
+    if (typeof value !== 'string') return value;
+    return value.replace(/\{\{top(\d+)(_[a-zA-Z0-9_]+)\}\}/g, (_, num, suffix) => `{{top${Number(num) + 1}${suffix}}}`);
+  };
+
+  const cloneDetailCardWithBumpedTopTokens = (detail) => ({
+    ...(detail || {}),
+    title: bumpTopTokenVersion(detail?.title || ''),
+    items: Array.isArray(detail?.items)
+      ? detail.items.map((item) => bumpTopTokenVersion(item))
+      : []
+  });
+
   const handleChange = (field, value) => {
     const newData = { ...data, [field]: value };
     setData(newData);
@@ -1417,10 +1430,7 @@ export default function PropertiesPanel({
                                       <button
                                         onClick={() => {
                                           const newDetails = [...(data.template.details || [])];
-                                          const clonedDetail = {
-                                            ...(detail || {}),
-                                            items: Array.isArray(detail.items) ? [...detail.items] : []
-                                          };
+                                          const clonedDetail = cloneDetailCardWithBumpedTopTokens(detail);
                                           newDetails.splice(idx + 1, 0, clonedDetail);
                                           handleChange('template', { ...data.template, details: newDetails });
                                         }}
