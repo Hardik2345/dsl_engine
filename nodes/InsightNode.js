@@ -105,11 +105,21 @@ async function InsightNode(def, context) {
 
   // --- Render output ---
   const summary = renderTemplate(templateObj.summary, templateContext);
+  const configuredDetails = Array.isArray(templateObj.details)
+    ? templateObj.details.filter(hasConfiguredDetailContent)
+    : [];
   const details = Array.isArray(templateObj.details)
     ? templateObj.details
       .map((line) => renderTemplateDetailEntry(line, templateContext))
       .filter(Boolean)
     : [];
+  const shouldSkipEmailForMissingRenderedDetails = configuredDetails.length > 0 && details.length === 0;
+  const insightRenderMeta = {
+    detailsConfigured: configuredDetails.length > 0,
+    configuredDetailsCount: configuredDetails.length,
+    renderedDetailsCount: details.length,
+    detailsRenderedEmpty: configuredDetails.length > 0 && details.length === 0
+  };
 
   const insight = {
     summary,
@@ -119,25 +129,34 @@ async function InsightNode(def, context) {
 
   let emailResult = null;
   if (email?.enabled) {
-    const renderedEmail = renderInsightEmail({
-      insight,
-      workflowId: context?.workflow_id || context?.meta?.workflowId,
-      workflowName: context?.meta?.workflowName,
-      brandName: context?.meta?.brandName || context?.meta?.tenantId,
-      subjectTemplate: email?.subject,
-      tenantId: context?.meta?.tenantId
-    });
+    if (shouldSkipEmailForMissingRenderedDetails) {
+      emailResult = {
+        status: 'skipped',
+        to: Array.isArray(email.to) ? email.to : [],
+        error: 'email skipped because configured detail templates rendered empty'
+      };
+    } else {
+      const renderedEmail = renderInsightEmail({
+        insight,
+        workflowId: context?.workflow_id || context?.meta?.workflowId,
+        workflowName: context?.meta?.workflowName,
+        brandName: context?.meta?.brandName || context?.meta?.tenantId,
+        subjectTemplate: email?.subject,
+        tenantId: context?.meta?.tenantId
+      });
 
-    emailResult = await sendEmail({
-      to: email.to,
-      subject: renderedEmail.subject,
-      html: renderedEmail.html,
-      text: renderedEmail.text
-    });
+      emailResult = await sendEmail({
+        to: email.to,
+        subject: renderedEmail.subject,
+        html: renderedEmail.html,
+        text: renderedEmail.text
+      });
+    }
   }
 
   const scratchDelta = {
-    finalInsight: insight
+    finalInsight: insight,
+    finalInsightMeta: insightRenderMeta
   };
   if (persist) {
     // implement db persistence here
@@ -225,6 +244,23 @@ function renderTemplateDetailEntry(entry, ctx) {
     title,
     items
   };
+}
+
+function hasConfiguredDetailContent(entry) {
+  if (typeof entry === 'string') {
+    return entry.trim() !== '';
+  }
+
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+    return false;
+  }
+
+  const title = String(entry.title || '').trim();
+  const items = Array.isArray(entry.items)
+    ? entry.items.some((item) => String(item || '').trim() !== '')
+    : false;
+
+  return title !== '' || items;
 }
 
 function computeConfidence(metrics, evidence) {

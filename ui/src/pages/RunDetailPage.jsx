@@ -161,6 +161,12 @@ export default function RunDetailPage() {
       .filter(Boolean)
       .at(-1)
     || null;
+  const finalInsightMeta = run?.context?.scratch?.finalInsightMeta
+    || run?.nodeOutputs
+      ?.map((output) => output?.result?.delta?.scratch?.finalInsightMeta)
+      .filter(Boolean)
+      .at(-1)
+    || null;
   const finalInsightEmail = run?.context?.scratch?.finalInsightEmail
     || run?.nodeOutputs
       ?.map((output) => output?.result?.delta?.scratch?.finalInsightEmail)
@@ -423,6 +429,25 @@ export default function RunDetailPage() {
                   </div>
                 )}
 
+                {finalInsightMeta && (
+                  <div className="pt-3 mt-3 border-t border-primary-200/50 space-y-1.5">
+                    <div className="flex items-center justify-between gap-4">
+                      <span className="text-xs text-primary-700">Detail Rendering</span>
+                      <span className="text-xs font-semibold text-primary-800">
+                        {finalInsightMeta.renderedDetailsCount}/{finalInsightMeta.configuredDetailsCount}
+                      </span>
+                    </div>
+                    <div className="text-xs text-primary-800">
+                      Configured details: {finalInsightMeta.detailsConfigured ? 'yes' : 'no'}
+                    </div>
+                    {finalInsightMeta.detailsConfigured && finalInsightMeta.detailsRenderedEmpty && (
+                      <div className="text-xs text-amber-700">
+                        All configured detail templates rendered empty for this run.
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {finalInsightEmail && (
                   <div className="pt-3 mt-3 border-t border-primary-200/50 space-y-2">
                     <div className="flex items-center justify-between gap-4">
@@ -430,7 +455,9 @@ export default function RunDetailPage() {
                       <span className={`text-xs font-semibold ${
                         finalInsightEmail.status === 'sent'
                           ? 'text-green-700'
-                          : 'text-red-700'
+                          : finalInsightEmail.status === 'skipped'
+                            ? 'text-amber-700'
+                            : 'text-red-700'
                       }`}>
                         {finalInsightEmail.status}
                       </span>

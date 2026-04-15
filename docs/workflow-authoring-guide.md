@@ -492,8 +492,10 @@ Runtime behavior:
 - Prefers `product_id` evidence when available
 - Uses `context.scratch.matched_breakdown` as the top evidence if a prior branch populated it
 - Writes final result to `context.scratch.finalInsight`
+- Writes detail rendering metadata to `context.scratch.finalInsightMeta`
 - If `persist` exists, it also sets `context.scratch.persistedInsight`
 - If email is enabled, it sends the rendered email and records `context.scratch.finalInsightEmail`
+- If `template.details` was configured but every detail row renders empty, email delivery is skipped and `context.scratch.finalInsightEmail.status` is set to `skipped`
 
 Template behavior:
 
@@ -951,4 +953,3 @@ These are the main footguns when reading only the JSON:
 9. Test one full-day manual run
 10. Test one partial-day manual run if the workflow may be scheduled hourly
 11. Only then attach schedules
-
