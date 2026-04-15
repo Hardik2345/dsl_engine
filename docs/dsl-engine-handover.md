@@ -141,7 +141,9 @@ Payload fields used commonly:
 - Optional exchange/queue/prefetch vars.
 4. Bridge auth
 - `ALERTS_INGEST_TOKEN`
-5. Debug (disable in prod)
+5. Workflow run retention
+- `WORKFLOW_RUN_TTL_SECONDS` optional. Defaults to `604800` (7 days) for terminal `WorkflowRun` cleanup via Mongo TTL.
+6. Debug (disable in prod)
 - `DEBUG_ALERT_EVENTS`
 - `DEBUG_RECURSIVE_BREAKDOWN`
 
@@ -156,4 +158,3 @@ Payload fields used commonly:
 2. Use exactly one channel for config CRUD to avoid duplicate noise.
 - Either Rabbit `alert.config.*`, or HTTP bridge from EC2.
 3. Keep idempotency keys stable and deterministic across retries.
-

@@ -1,5 +1,17 @@
 const mongoose = require('mongoose');
 
+const TERMINAL_STATUSES = new Set(['completed', 'terminated', 'failed', 'dead_letter', 'canceled']);
+const DEFAULT_WORKFLOW_RUN_TTL_SECONDS = 7 * 24 * 60 * 60;
+
+function getWorkflowRunTtlSeconds() {
+  const raw = process.env.WORKFLOW_RUN_TTL_SECONDS;
+  if (raw == null || raw === '') return DEFAULT_WORKFLOW_RUN_TTL_SECONDS;
+
+  const ttlSeconds = Number(raw);
+  if (!Number.isFinite(ttlSeconds) || ttlSeconds <= 0) return null;
+  return Math.floor(ttlSeconds);
+}
+
 const WorkflowRunSchema = new mongoose.Schema(
   {
     tenantId: { type: String, required: true, index: true },
@@ -26,13 +38,28 @@ const WorkflowRunSchema = new mongoose.Schema(
     leaseExpiresAt: { type: Date, default: null },
     lastError: { type: String, default: null },
     startedAt: { type: Date, required: true },
-    finishedAt: { type: Date }
+    finishedAt: { type: Date },
+    retentionExpiresAt: { type: Date, default: null }
   },
   { timestamps: true }
 );
 
+WorkflowRunSchema.pre('save', function applyRetentionExpiry(next) {
+  const ttlSeconds = getWorkflowRunTtlSeconds();
+  const isTerminal = TERMINAL_STATUSES.has(this.status);
+
+  if (!ttlSeconds || !isTerminal || !this.finishedAt) {
+    this.retentionExpiresAt = null;
+    return next();
+  }
+
+  this.retentionExpiresAt = new Date(this.finishedAt.getTime() + (ttlSeconds * 1000));
+  return next();
+});
+
 WorkflowRunSchema.index({ tenantId: 1, workflowId: 1, startedAt: -1 });
 WorkflowRunSchema.index({ status: 1, queuedAt: 1 });
 WorkflowRunSchema.index({ executionKey: 1, status: 1 });
+WorkflowRunSchema.index({ retentionExpiresAt: 1 }, { expireAfterSeconds: 0 });
 
 module.exports = mongoose.model('WorkflowRun', WorkflowRunSchema);
