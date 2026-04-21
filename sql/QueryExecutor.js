@@ -1,10 +1,21 @@
 // sql/QueryExecutor.js
+const fs = require('node:fs');
 const mysql = require('mysql2/promise');
 const dns = require('node:dns');
 
 dns.setDefaultResultOrder('ipv4first');
 
 const pools = new Map();
+
+function buildSslConfig() {
+  const caPath = process.env.DB_SSL_CA_PATH;
+  if (caPath) {
+    return { ca: fs.readFileSync(caPath), rejectUnauthorized: true };
+  }
+  return { rejectUnauthorized: false };
+}
+
+const sslConfig = buildSslConfig();
 
 function getPool(dbName) {
   if (!dbName) throw new Error('QueryExecutor: tenantId/dbName is required');
@@ -16,7 +27,7 @@ function getPool(dbName) {
     user: process.env.DB_USER,
     password: process.env.DB_PASSWORD,
     database: dbName,
-    ssl: { rejectUnauthorized: false },
+    ssl: sslConfig,
     decimalNumbers: true,
     waitForConnections: true,
     connectionLimit: 10,
