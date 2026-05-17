@@ -8,6 +8,7 @@ import { Button, Badge, Card, PageSpinner, EmptyState } from '../components/ui';
 import RunWorkflowModal from '../components/RunWorkflowModal';
 import CreateWorkflowModal from '../components/CreateWorkflowModal';
 import EditWorkflowModal from '../components/EditWorkflowModal';
+import { getWorkflowKindLabel, getWorkflowKindStatus } from '../utils/workflowKind';
 import toast from 'react-hot-toast';
 
 export default function WorkflowsPage() {
@@ -131,7 +132,12 @@ export default function WorkflowsPage() {
                         >
                           {workflow.name || workflow.workflowId}
                         </Link>
-                        <p className="text-xs text-gray-400 font-mono">{workflow.workflowId}</p>
+                        <div className="mt-1 flex flex-wrap items-center gap-2">
+                          <p className="text-xs text-gray-400 font-mono">{workflow.workflowId}</p>
+                          <Badge status={getWorkflowKindStatus(workflow)}>
+                            {getWorkflowKindLabel(workflow)}
+                          </Badge>
+                        </div>
                       </div>
                     </td>
                     <td className="py-4 px-6">

@@ -10,6 +10,32 @@ import {
 } from './endpoints';
 import { useTenant } from '../context/TenantContext';
 
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function waitForWorkflowJob(jobId, { pollMs = 1000, timeoutMs = 300000, onProgress } = {}) {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const job = await workflowApi.getJob(jobId);
+    onProgress?.(job);
+    if (job.status === 'completed' || job.status === 'failed') {
+      return {
+        jobId: job.jobId,
+        type: job.type,
+        workflowId: job.workflowId,
+        scheduleGroupId: job.scheduleGroupId,
+        successes: job.successes || [],
+        failures: job.failures || [],
+        status: job.status,
+        error: job.error
+      };
+    }
+    await delay(pollMs);
+  }
+
+  throw new Error('Timed out waiting for workflow job');
+}
+
 // ============ Tenant Hooks ============
 
 export function useTenants() {
@@ -81,6 +107,27 @@ export function useCreateWorkflow() {
     mutationFn: (definition) => workflowApi.create(tenantId, definition),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['workflows', tenantId] });
+    },
+  });
+}
+
+export function useCreateWorkflowForTenants() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (payload) => {
+      const { onProgress, ...requestPayload } = payload || {};
+      const result = await workflowApi.createForTenants(requestPayload);
+      if (!result?.job?.jobId) {
+        return result;
+      }
+      onProgress?.(result.job);
+      return waitForWorkflowJob(result.job.jobId, { onProgress });
+    },
+    onSuccess: (result) => {
+      (result?.successes || []).forEach(({ tenantId }) => {
+        queryClient.invalidateQueries({ queryKey: ['workflows', tenantId] });
+      });
     },
   });
 }
@@ -243,6 +290,28 @@ export function useCreateWorkflowSchedule(workflowId) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['schedules', tenantId, workflowId] });
       queryClient.invalidateQueries({ queryKey: ['schedulerQueue', tenantId] });
+    }
+  });
+}
+
+export function useCreateWorkflowBulkSchedule(workflowId) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (payload) => {
+      const { onProgress, ...requestPayload } = payload || {};
+      const result = await scheduleApi.createBulk(workflowId, requestPayload);
+      if (!result?.job?.jobId) {
+        return result;
+      }
+      onProgress?.(result.job);
+      return waitForWorkflowJob(result.job.jobId, { onProgress });
+    },
+    onSuccess: (result) => {
+      (result?.successes || []).forEach(({ tenantId, workflowId }) => {
+        queryClient.invalidateQueries({ queryKey: ['schedules', tenantId, workflowId] });
+        queryClient.invalidateQueries({ queryKey: ['schedulerQueue', tenantId] });
+      });
     }
   });
 }

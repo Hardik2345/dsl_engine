@@ -7,6 +7,7 @@ require('dotenv').config();
 const authRoutes = require('./server/routes/auth');
 const workflowRoutes = require('./server/routes/workflows');
 const globalWorkflowRoutes = require('./server/routes/globalWorkflows');
+const workflowBulkRoutes = require('./server/routes/workflowBulk');
 const runRoutes = require('./server/routes/runs');
 const insightRoutes = require('./server/routes/insights');
 const tenantRoutes = require('./server/routes/tenants');
@@ -59,6 +60,7 @@ app.get('/version', (req, res) => {
 app.use('/auth', authRoutes);
 app.use('/tenants', tenantRoutes);
 app.use('/workflows/global', globalWorkflowRoutes);
+app.use('/workflows', workflowBulkRoutes);
 app.use('/tenants/:tenantId/workflows', workflowRoutes);
 app.use('/tenants/:tenantId/workflows', runRoutes);
 app.use('/tenants/:tenantId/workflows', scheduleRoutes);

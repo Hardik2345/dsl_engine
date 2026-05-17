@@ -14,6 +14,9 @@ const statusStyles = {
   pending: 'bg-yellow-100 text-yellow-800',
   active: 'bg-green-100 text-green-800',
   inactive: 'bg-gray-100 text-gray-800',
+  global: 'bg-purple-100 text-purple-800',
+  multi_tenant: 'bg-blue-100 text-blue-800',
+  single_tenant: 'bg-slate-100 text-slate-800',
 };
 
 export default function Badge({ status, children, className }) {

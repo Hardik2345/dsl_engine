@@ -57,6 +57,17 @@ export const workflowApi = {
     return data;
   },
 
+  // Create one tenant-scoped workflow for multiple tenants
+  createForTenants: async ({ tenantIds, definition, name }) => {
+    const { data } = await api.post('/workflows/bulk', { tenantIds, definition, name });
+    return data;
+  },
+
+  getJob: async (jobId) => {
+    const { data } = await api.get(`/workflows/jobs/${jobId}`);
+    return data.job;
+  },
+
   // Create a new global workflow
   createGlobal: async (definition) => {
     const { data } = await api.post('/workflows/global', definition);
@@ -168,6 +179,14 @@ export const scheduleApi = {
       payload
     );
     return data.schedule;
+  },
+
+  createBulk: async (workflowId, payload) => {
+    const { data } = await api.post(
+      `/workflows/${workflowId}/schedules/bulk`,
+      payload
+    );
+    return data;
   },
 
   update: async (tenantId, workflowId, scheduleId, payload) => {

@@ -4,6 +4,13 @@ const Workflow = require('../models/Workflow');
 const WorkflowVersion = require('../models/WorkflowVersion');
 const Tenant = require('../models/Tenant');
 const { validateWorkflowDefinition } = require('../validation/workflowDefinition');
+const { attachWorkflowKind, attachWorkflowKinds } = require('../lib/workflowKind');
+const {
+  buildTenantWorkflowQuery,
+  buildWorkflowVersionQuery,
+  getVersionTenantId,
+  getWorkflowTenantIds
+} = require('../services/workflowResolverService');
 
 function generateWorkflowId() {
   return `wf_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
@@ -58,12 +65,20 @@ router.use(validateTenant);
 
 router.get('/', async (req, res, next) => {
   try {
-     const { tenantId } = req.params;
+    const { tenantId } = req.params;
     const includeGlobal = req.query.includeGlobal === 'true';
 
-    const tenantWorkflows = await Workflow.find({ tenantId }).lean();
+    const tenantWorkflows = await Workflow.find({
+      $or: [
+        { tenantIds: tenantId },
+        { tenantId }
+      ],
+      $and: [
+        { $or: [{ scope: 'tenant' }, { scope: { $exists: false } }] }
+      ]
+    }).lean();
     if (!includeGlobal) {
-      return res.json({ workflows: tenantWorkflows });
+      return res.json({ workflows: attachWorkflowKinds(tenantWorkflows) });
     }
 
     const globalWorkflows = await Workflow.find({ scope: 'global', tenantId: null }).lean();
@@ -72,7 +87,7 @@ router.get('/', async (req, res, next) => {
     globalWorkflows.forEach((workflow) => workflowsById.set(workflow.workflowId, workflow));
     tenantWorkflows.forEach((workflow) => workflowsById.set(workflow.workflowId, workflow));
 
-    res.json({ workflows: Array.from(workflowsById.values()) });
+    res.json({ workflows: attachWorkflowKinds(Array.from(workflowsById.values())) });
   } catch (err) {
     next(err);
   }
@@ -82,11 +97,7 @@ router.post('/', async (req, res, next) => {
   try {
     const { tenantId } = req.params;
     const definition = normalizeTriggerDefinition(req.body, tenantId, 'tenant');
-    
-    // Auto-generate workflow_id if not provided
-    if (!definition.workflow_id) {
-      definition.workflow_id = generateWorkflowId();
-    }
+    definition.workflow_id = generateWorkflowId();
     
     const { ok, errors } = validateWorkflowDefinition(definition);
     if (!ok) {
@@ -97,7 +108,8 @@ router.post('/', async (req, res, next) => {
     const version = definition.version;
 
     const workflow = await Workflow.create({
-      tenantId,
+      tenantId: null,
+      tenantIds: [tenantId],
       scope: 'tenant',
       workflowId,
       name: definition.name || workflowId,
@@ -106,14 +118,15 @@ router.post('/', async (req, res, next) => {
     });
 
     await WorkflowVersion.create({
-      tenantId,
+      tenantId: null,
+      tenantIds: [tenantId],
       scope: 'tenant',
       workflowId,
       version,
       definitionJson: definition
     });
 
-    res.status(201).json({ workflow });
+    res.status(201).json({ workflow: attachWorkflowKind(workflow.toObject()) });
   } catch (err) {
     next(err);
   }
@@ -124,25 +137,17 @@ router.get('/:workflowId', async (req, res, next) => {
     const { tenantId, workflowId } = req.params;
     const includeGlobal = req.query.includeGlobal === 'true';
 
-    let workflow = await Workflow.findOne({ tenantId, workflowId }).lean();
+    let workflow = await Workflow.findOne(buildTenantWorkflowQuery(tenantId, workflowId)).lean();
     if (!workflow && includeGlobal) {
       workflow = await Workflow.findOne({ scope: 'global', tenantId: null, workflowId }).lean();
     }
     if (!workflow) return res.status(404).json({ error: 'workflow not found' });
 
-    const scope = workflow.scope || 'tenant';
-    const scopeClause = scope === 'global'
-      ? { scope: 'global' }
-      : { $or: [{ scope: 'tenant' }, { scope: { $exists: false } }] };
+    const version = await WorkflowVersion.findOne(
+      buildWorkflowVersionQuery(workflow, workflowId, workflow.latestVersion)
+    ).lean();
 
-    const version = await WorkflowVersion.findOne({
-      tenantId: workflow.tenantId ?? null,
-      workflowId,
-      version: workflow.latestVersion,
-      ...scopeClause
-    }).lean();
-
-    res.json({ workflow, version });
+    res.json({ workflow: attachWorkflowKind(workflow), version });
   } catch (err) {
     next(err);
   }
@@ -161,12 +166,13 @@ router.post('/:workflowId/versions', async (req, res, next) => {
     }
 
     const version = definition.version;
-    const workflow = await Workflow.findOne({ tenantId, workflowId });
+    const workflow = await Workflow.findOne(buildTenantWorkflowQuery(tenantId, workflowId));
     if (!workflow) return res.status(404).json({ error: 'workflow not found' });
 
     await WorkflowVersion.create({
-      tenantId,
+      tenantId: getVersionTenantId(workflow),
       scope: workflow.scope || 'tenant',
+      tenantIds: getWorkflowTenantIds(workflow),
       workflowId,
       version,
       definitionJson: definition
@@ -190,22 +196,15 @@ router.get('/:workflowId/versions', async (req, res, next) => {
     const { tenantId, workflowId } = req.params;
     const includeGlobal = req.query.includeGlobal === 'true';
 
-    let workflow = await Workflow.findOne({ tenantId, workflowId }).lean();
+    let workflow = await Workflow.findOne(buildTenantWorkflowQuery(tenantId, workflowId)).lean();
     if (!workflow && includeGlobal) {
       workflow = await Workflow.findOne({ scope: 'global', tenantId: null, workflowId }).lean();
     }
     if (!workflow) return res.status(404).json({ error: 'workflow not found' });
 
-    const scope = workflow.scope || 'tenant';
-    const scopeClause = scope === 'global'
-      ? { scope: 'global' }
-      : { $or: [{ scope: 'tenant' }, { scope: { $exists: false } }] };
-
-    const versions = await WorkflowVersion.find({
-      tenantId: workflow.tenantId ?? null,
-      workflowId,
-      ...scopeClause
-    })
+    const versions = await WorkflowVersion.find(
+      buildWorkflowVersionQuery(workflow, workflowId)
+    )
       .sort({ createdAt: -1 })
       .lean();
     res.json({ versions });
@@ -220,14 +219,14 @@ router.patch('/:workflowId', async (req, res, next) => {
     const { tenantId, workflowId } = req.params;
     const { name, isActive } = req.body;
 
-    const workflow = await Workflow.findOne({ tenantId, workflowId });
+    const workflow = await Workflow.findOne(buildTenantWorkflowQuery(tenantId, workflowId));
     if (!workflow) return res.status(404).json({ error: 'workflow not found' });
 
     if (name !== undefined) workflow.name = name;
     if (isActive !== undefined) workflow.isActive = isActive;
 
     await workflow.save();
-    res.json({ workflow });
+    res.json({ workflow: attachWorkflowKind(workflow.toObject()) });
   } catch (err) {
     next(err);
   }
@@ -238,14 +237,14 @@ router.delete('/:workflowId', async (req, res, next) => {
   try {
     const { tenantId, workflowId } = req.params;
 
-    const workflow = await Workflow.findOne({ tenantId, workflowId });
+    const workflow = await Workflow.findOne(buildTenantWorkflowQuery(tenantId, workflowId));
     if (!workflow) return res.status(404).json({ error: 'workflow not found' });
 
     // Delete all versions
-    await WorkflowVersion.deleteMany({ tenantId, workflowId });
+    await WorkflowVersion.deleteMany(buildWorkflowVersionQuery(workflow, workflowId));
 
     // Delete the workflow
-    await Workflow.deleteOne({ tenantId, workflowId });
+    await Workflow.deleteOne({ _id: workflow._id });
 
     res.json({ message: 'Workflow deleted successfully' });
   } catch (err) {

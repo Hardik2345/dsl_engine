@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const Workflow = require('../models/Workflow');
 const WorkflowVersion = require('../models/WorkflowVersion');
 const { validateWorkflowDefinition } = require('../validation/workflowDefinition');
+const { attachWorkflowKind, attachWorkflowKinds } = require('../lib/workflowKind');
 
 function generateWorkflowId() {
   return `wf_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
@@ -34,7 +35,7 @@ function normalizeTriggerDefinition(definition) {
 router.get('/', async (req, res, next) => {
   try {
     const workflows = await Workflow.find({ scope: 'global', tenantId: null }).lean();
-    res.json({ workflows });
+    res.json({ workflows: attachWorkflowKinds(workflows) });
   } catch (err) {
     next(err);
   }
@@ -43,10 +44,7 @@ router.get('/', async (req, res, next) => {
 router.post('/', async (req, res, next) => {
   try {
     const definition = normalizeTriggerDefinition(req.body);
-
-    if (!definition.workflow_id) {
-      definition.workflow_id = generateWorkflowId();
-    }
+    definition.workflow_id = generateWorkflowId();
 
     const { ok, errors } = validateWorkflowDefinition(definition);
     if (!ok) {
@@ -58,6 +56,7 @@ router.post('/', async (req, res, next) => {
 
     const workflow = await Workflow.create({
       tenantId: null,
+      tenantIds: [],
       scope: 'global',
       workflowId,
       name: definition.name || workflowId,
@@ -67,13 +66,14 @@ router.post('/', async (req, res, next) => {
 
     await WorkflowVersion.create({
       tenantId: null,
+      tenantIds: [],
       scope: 'global',
       workflowId,
       version,
       definitionJson: definition
     });
 
-    res.status(201).json({ workflow });
+    res.status(201).json({ workflow: attachWorkflowKind(workflow.toObject()) });
   } catch (err) {
     next(err);
   }
@@ -92,7 +92,7 @@ router.get('/:workflowId', async (req, res, next) => {
       version: workflow.latestVersion
     }).lean();
 
-    res.json({ workflow, version });
+    res.json({ workflow: attachWorkflowKind(workflow), version });
   } catch (err) {
     next(err);
   }
@@ -117,6 +117,7 @@ router.post('/:workflowId/versions', async (req, res, next) => {
 
     await WorkflowVersion.create({
       tenantId: null,
+      tenantIds: [],
       scope: 'global',
       workflowId,
       version,
@@ -163,7 +164,7 @@ router.patch('/:workflowId', async (req, res, next) => {
     if (isActive !== undefined) workflow.isActive = isActive;
 
     await workflow.save();
-    res.json({ workflow });
+    res.json({ workflow: attachWorkflowKind(workflow.toObject()) });
   } catch (err) {
     next(err);
   }

@@ -13,6 +13,7 @@ const WorkflowScheduleSchema = new mongoose.Schema(
   {
     tenantId: { type: String, required: true, index: true },
     workflowId: { type: String, required: true, index: true },
+    scheduleGroupId: { type: String, default: null, index: true },
     name: { type: String },
     triggerType: { type: String, enum: ['cron'], default: 'cron' },
     cronExpr: { type: String, required: true },
@@ -39,5 +40,6 @@ const WorkflowScheduleSchema = new mongoose.Schema(
 );
 
 WorkflowScheduleSchema.index({ tenantId: 1, workflowId: 1, isActive: 1 });
+WorkflowScheduleSchema.index({ scheduleGroupId: 1, tenantId: 1, workflowId: 1 });
 
 module.exports = mongoose.model('WorkflowSchedule', WorkflowScheduleSchema);

@@ -1,8 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { WorkflowBuilder, PageSpinner } from '../components';
-import { useQueryClient } from '@tanstack/react-query';
-import { useWorkflow, useWorkflows, useCreateGlobalWorkflow, useCreateWorkflowVersion, useCreateGlobalWorkflowVersion, useTenants } from '../api/hooks';
+import { useWorkflow, useWorkflows, useCreateGlobalWorkflow, useCreateWorkflowForTenants, useCreateWorkflowVersion, useCreateGlobalWorkflowVersion, useTenants } from '../api/hooks';
 import { workflowApi } from '../api/endpoints';
 import { useTenant } from '../context/TenantContext';
 import toast from 'react-hot-toast';
@@ -53,14 +52,15 @@ export default function WorkflowBuilderPage() {
   const { workflowId } = useParams();
   const navigate = useNavigate();
   const isEditing = !!workflowId;
-  const queryClient = useQueryClient();
   const { tenantId } = useTenant();
   const { data: tenants = [], isLoading: tenantsLoading } = useTenants();
   const { data: availableWorkflows = [] } = useWorkflows();
   const createGlobalWorkflow = useCreateGlobalWorkflow();
+  const createWorkflowForTenants = useCreateWorkflowForTenants();
   const [scope, setScope] = useState('single'); // 'single' | 'multiple' | 'global'
   const [selectedTenantIds, setSelectedTenantIds] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [jobProgress, setJobProgress] = useState(null);
 
   // Hooks for fetching (if editing)
   const { data: workflowData, isLoading, error } = useWorkflow(workflowId);
@@ -127,42 +127,36 @@ export default function WorkflowBuilderPage() {
     }
 
     setIsSubmitting(true);
+    setJobProgress(null);
 
     try {
-      const results = await Promise.allSettled(
-        tenantIds.map((targetTenantId) => workflowApi.create(targetTenantId, definition))
-      );
+      if (tenantIds.length === 1 && tenantIds[0] === tenantId) {
+        return await workflowApi.create(tenantId, definition);
+      }
 
-      const successes = results
-        .map((result, index) => ({ result, tenantId: tenantIds[index] }))
-        .filter((entry) => entry.result.status === 'fulfilled');
-      const failures = results
-        .map((result, index) => ({ result, tenantId: tenantIds[index] }))
-        .filter((entry) => entry.result.status === 'rejected');
-
-      successes.forEach(({ tenantId: successTenantId }) => {
-        queryClient.invalidateQueries({ queryKey: ['workflows', successTenantId] });
+      const result = await createWorkflowForTenants.mutateAsync({
+        tenantIds,
+        definition,
+        name: definition.name,
+        onProgress: setJobProgress
       });
 
-      if (failures.length) {
-        const failedTenantList = failures.map((entry) => entry.tenantId).join(', ');
+      if (result.failures?.length) {
+        const failedTenantList = result.failures.map((entry) => entry.tenantId).join(', ');
         toast.error(`Failed to create workflow for: ${failedTenantList}`);
       }
 
-      if (!successes.length) {
+      if (!result.successes?.length) {
         return null;
       }
 
-      if (tenantIds.length === 1 && tenantIds[0] === tenantId) {
-        return successes[0].result.value;
-      }
-
-      const successCount = successes.length;
+      const successCount = result.successes.length;
       const successLabel = successCount === 1 ? 'tenant' : 'tenant(s)';
       toast.success(`Workflow created for ${successCount} ${successLabel}`);
       return null;
     } finally {
       setIsSubmitting(false);
+      setJobProgress(null);
     }
   };
 
@@ -215,6 +209,11 @@ export default function WorkflowBuilderPage() {
       }
     } catch (err) {
       console.error(err);
+      if (err.response?.status === 409 && err.response?.data?.conflicts?.length) {
+        const tenantList = err.response.data.conflicts.map((item) => item.tenantId).join(', ');
+        toast.error(`Workflow ID already exists for: ${tenantList}`);
+        return;
+      }
       const errorMsg = err.response?.data?.error 
         || (err.response?.data?.errors ? err.response.data.errors.join(', ') : null)
         || 'Failed to save workflow';
@@ -224,6 +223,29 @@ export default function WorkflowBuilderPage() {
 
   return (
     <div className="h-screen w-full bg-white">
+      {jobProgress && (
+        <div className="fixed left-1/2 top-4 z-50 w-[min(520px,calc(100vw-32px))] -translate-x-1/2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 shadow-lg">
+          <div className="flex items-center justify-between gap-3 text-sm">
+            <span className="font-medium text-blue-900">
+              Creating workflows: {jobProgress.status}
+            </span>
+            <span className="text-blue-700">
+              {jobProgress.processedCount || 0}/{jobProgress.totalCount || 0}
+              {jobProgress.failureCount ? `, ${jobProgress.failureCount} failed` : ''}
+            </span>
+          </div>
+          <div className="mt-2 h-2 rounded-full bg-blue-100 overflow-hidden">
+            <div
+              className="h-full bg-blue-600 transition-all"
+              style={{
+                width: `${jobProgress.totalCount
+                  ? Math.min(100, ((jobProgress.processedCount || 0) / jobProgress.totalCount) * 100)
+                  : 0}%`
+              }}
+            />
+          </div>
+        </div>
+      )}
       {isEditing && isLoading ? (
         <PageSpinner />
       ) : isEditing && error ? (

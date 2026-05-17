@@ -2,14 +2,12 @@ import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { X, Plus } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { useQueryClient } from '@tanstack/react-query';
-import { useCreateGlobalWorkflow, useTenants } from '../api/hooks';
+import { useCreateGlobalWorkflow, useCreateWorkflowForTenants, useTenants } from '../api/hooks';
 import { workflowApi } from '../api/endpoints';
 import { useTenant } from '../context/TenantContext';
 import { Button } from './ui';
 
 const WORKFLOW_TEMPLATE = {
-  workflow_id: '',
   workflow_type: 'root_cause_analysis',
   description: '',
   version: '1.0',
@@ -57,14 +55,15 @@ const WORKFLOW_TEMPLATE = {
 
 export default function CreateWorkflowModal({ onClose }) {
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const { tenantId } = useTenant();
   const { data: tenants = [], isLoading: tenantsLoading } = useTenants();
   const createGlobalWorkflow = useCreateGlobalWorkflow();
+  const createWorkflowForTenants = useCreateWorkflowForTenants();
   const [mode, setMode] = useState('form'); // 'form' or 'json'
   const [scope, setScope] = useState('single'); // 'single' | 'multiple' | 'global'
   const [selectedTenantIds, setSelectedTenantIds] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [jobProgress, setJobProgress] = useState(null);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -111,42 +110,36 @@ export default function CreateWorkflowModal({ onClose }) {
     }
 
     setIsSubmitting(true);
+    setJobProgress(null);
 
     try {
-      const results = await Promise.allSettled(
-        tenantIds.map((targetTenantId) => workflowApi.create(targetTenantId, definition))
-      );
+      if (tenantIds.length === 1 && tenantIds[0] === tenantId) {
+        return await workflowApi.create(tenantId, definition);
+      }
 
-      const successes = results
-        .map((result, index) => ({ result, tenantId: tenantIds[index] }))
-        .filter((entry) => entry.result.status === 'fulfilled');
-      const failures = results
-        .map((result, index) => ({ result, tenantId: tenantIds[index] }))
-        .filter((entry) => entry.result.status === 'rejected');
-
-      successes.forEach(({ tenantId: successTenantId }) => {
-        queryClient.invalidateQueries({ queryKey: ['workflows', successTenantId] });
+      const result = await createWorkflowForTenants.mutateAsync({
+        tenantIds,
+        definition,
+        name: definition.name,
+        onProgress: setJobProgress
       });
 
-      if (failures.length) {
-        const failedTenantList = failures.map((entry) => entry.tenantId).join(', ');
+      if (result.failures?.length) {
+        const failedTenantList = result.failures.map((entry) => entry.tenantId).join(', ');
         toast.error(`Failed to create workflow for: ${failedTenantList}`);
       }
 
-      if (!successes.length) {
+      if (!result.successes?.length) {
         return null;
       }
 
-      if (tenantIds.length === 1 && tenantIds[0] === tenantId) {
-        return successes[0].result.value;
-      }
-
-      const successCount = successes.length;
+      const successCount = result.successes.length;
       const successLabel = successCount === 1 ? 'tenant' : 'tenant(s)';
       toast.success(`Workflow created for ${successCount} ${successLabel}`);
       return null;
     } finally {
       setIsSubmitting(false);
+      setJobProgress(null);
     }
   };
 
@@ -222,7 +215,12 @@ export default function CreateWorkflowModal({ onClose }) {
         onClose();
       }
     } catch (err) {
-      toast.error(err.response?.data?.errors?.join(', ') || 'Failed to create workflow');
+      if (err.response?.status === 409 && err.response?.data?.conflicts?.length) {
+        const tenantList = err.response.data.conflicts.map((item) => item.tenantId).join(', ');
+        toast.error(`Workflow ID already exists for: ${tenantList}`);
+      } else {
+        toast.error(err.response?.data?.errors?.join(', ') || 'Failed to create workflow');
+      }
     }
   };
 
@@ -231,6 +229,7 @@ export default function CreateWorkflowModal({ onClose }) {
 
     try {
       const definition = JSON.parse(jsonInput);
+      delete definition.workflow_id;
       setJsonError(null);
 
       const result = scope === 'global'
@@ -246,6 +245,9 @@ export default function CreateWorkflowModal({ onClose }) {
     } catch (err) {
       if (err instanceof SyntaxError) {
         setJsonError('Invalid JSON format');
+      } else if (err.response?.status === 409 && err.response?.data?.conflicts?.length) {
+        const tenantList = err.response.data.conflicts.map((item) => item.tenantId).join(', ');
+        toast.error(`Workflow ID already exists for: ${tenantList}`);
       } else {
         toast.error(err.response?.data?.errors?.join(', ') || 'Failed to create workflow');
       }
@@ -557,6 +559,29 @@ export default function CreateWorkflowModal({ onClose }) {
         </div>
 
         {/* Footer */}
+        {jobProgress && (
+          <div className="px-6 py-3 border-t border-gray-200 bg-blue-50">
+            <div className="flex items-center justify-between gap-3 text-sm">
+              <span className="font-medium text-blue-900">
+                Creating workflows: {jobProgress.status}
+              </span>
+              <span className="text-blue-700">
+                {jobProgress.processedCount || 0}/{jobProgress.totalCount || 0}
+                {jobProgress.failureCount ? `, ${jobProgress.failureCount} failed` : ''}
+              </span>
+            </div>
+            <div className="mt-2 h-2 rounded-full bg-blue-100 overflow-hidden">
+              <div
+                className="h-full bg-blue-600 transition-all"
+                style={{
+                  width: `${jobProgress.totalCount
+                    ? Math.min(100, ((jobProgress.processedCount || 0) / jobProgress.totalCount) * 100)
+                    : 0}%`
+                }}
+              />
+            </div>
+          </div>
+        )}
         <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50">
           <Button type="button" variant="secondary" onClick={onClose}>
             Cancel

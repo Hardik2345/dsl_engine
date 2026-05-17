@@ -13,27 +13,23 @@ const {
 } = require('./cronUtils');
 const { enqueueRun } = require('./runQueueService');
 const { resolveWorkflowVersion } = require('../../server/services/workflowExecutionService');
+const { buildWorkflowVersionQuery } = require('../../server/services/workflowResolverService');
 const { SCHEDULE_WINDOW_MODES } = require('./scheduleWindowModes');
 
 async function getWorkflowCandidates(tenantId, includeGlobal = true) {
-  const clauses = [{ tenantId, isActive: true }];
+  const clauses = [
+    { tenantIds: tenantId, isActive: true },
+    { tenantId, isActive: true }
+  ];
   if (includeGlobal) {
     clauses.push({ scope: 'global', tenantId: null, isActive: true });
   }
 
   const workflows = await Workflow.find({ $or: clauses }).lean();
   const candidates = await Promise.all(workflows.map(async (workflow) => {
-    const scope = workflow.scope || 'tenant';
-    const scopeClause = scope === 'global'
-      ? { scope: 'global' }
-      : { $or: [{ scope: 'tenant' }, { scope: { $exists: false } }] };
-
-    const version = await WorkflowVersion.findOne({
-      tenantId: workflow.tenantId ?? null,
-      workflowId: workflow.workflowId,
-      version: workflow.latestVersion,
-      ...scopeClause
-    }).lean();
+    const version = await WorkflowVersion.findOne(
+      buildWorkflowVersionQuery(workflow, workflow.workflowId, workflow.latestVersion)
+    ).lean();
 
     return {
       workflow,
@@ -330,6 +326,7 @@ async function createSchedule({ tenantId, workflowId, payload }) {
   return WorkflowSchedule.create({
     tenantId,
     workflowId,
+    scheduleGroupId: payload.scheduleGroupId || null,
     name: payload.name || `${workflowId}-schedule`,
     cronExpr: payload.cronExpr,
     timezone: payload.timezone || 'UTC',

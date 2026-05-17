@@ -31,9 +31,71 @@ function buildVersionScopeClause(scope) {
     : { $or: [{ scope: 'tenant' }, { scope: { $exists: false } }] };
 }
 
+function buildTenantWorkflowQuery(tenantId, workflowId) {
+  return {
+    workflowId,
+    $or: [
+      { tenantIds: tenantId },
+      { tenantId }
+    ],
+    $and: [
+      { $or: [{ scope: 'tenant' }, { scope: { $exists: false } }] }
+    ]
+  };
+}
+
+function getWorkflowTenantIds(workflow = {}) {
+  if (Array.isArray(workflow.tenantIds) && workflow.tenantIds.length) {
+    return workflow.tenantIds;
+  }
+  return workflow.tenantId ? [workflow.tenantId] : [];
+}
+
+function getVersionTenantId(workflow = {}) {
+  if (Array.isArray(workflow.tenantIds) && workflow.tenantIds.length) {
+    return null;
+  }
+  return workflow.tenantId ?? null;
+}
+
+function buildWorkflowVersionQuery(workflow = {}, workflowId, version) {
+  const scope = workflow.scope || 'tenant';
+  const query = {
+    workflowId,
+    ...buildVersionScopeClause(scope),
+  };
+
+  if (version !== undefined && version !== null) {
+    query.version = version;
+  }
+
+  if (scope === 'global') {
+    query.tenantId = null;
+    return query;
+  }
+
+  const tenantIds = getWorkflowTenantIds(workflow);
+  if (tenantIds.length) {
+    query.$and = [
+      ...(query.$and || []),
+      {
+        $or: [
+          { tenantIds: { $in: tenantIds } },
+          { tenantId: { $in: tenantIds } }
+        ]
+      }
+    ];
+    return query;
+  }
+
+  query.tenantId = getVersionTenantId(workflow);
+  return query;
+}
+
 function normalizeWorkflowIdentity(workflow, versionId) {
   const scope = workflow.scope || 'tenant';
-  const tenantScope = scope === 'global' ? 'global' : (workflow.tenantId || 'tenant');
+  const tenantIds = getWorkflowTenantIds(workflow);
+  const tenantScope = scope === 'global' ? 'global' : (workflow.tenantId || tenantIds.join(',') || 'tenant');
   return `${tenantScope}/${workflow.workflowId}@${versionId}`;
 }
 
@@ -58,7 +120,7 @@ async function resolveWorkflowRecord({
       throw scopeMismatchError(`workflow scope '${preferredScope}' is not allowed`);
     }
     if (preferredScope === 'tenant') {
-      workflow = canUseTenant ? await Workflow.findOne({ tenantId, workflowId }).lean() : null;
+      workflow = canUseTenant ? await Workflow.findOne(buildTenantWorkflowQuery(tenantId, workflowId)).lean() : null;
     } else if (preferredScope === 'global') {
       workflow = canUseGlobal
         ? await Workflow.findOne({ scope: 'global', tenantId: null, workflowId }).lean()
@@ -69,7 +131,7 @@ async function resolveWorkflowRecord({
     }
   } else {
     if (canUseTenant) {
-      workflow = await Workflow.findOne({ tenantId, workflowId }).lean();
+      workflow = await Workflow.findOne(buildTenantWorkflowQuery(tenantId, workflowId)).lean();
     }
     if (!workflow && allowGlobalFallback && canUseGlobal) {
       workflow = await Workflow.findOne({ scope: 'global', tenantId: null, workflowId }).lean();
@@ -103,15 +165,9 @@ async function resolveWorkflowVersion({
   });
 
   const versionId = version || workflow.latestVersion;
-  const scope = workflow.scope || 'tenant';
-  const scopeClause = buildVersionScopeClause(scope);
-
-  const workflowVersion = await WorkflowVersion.findOne({
-    tenantId: workflow.tenantId ?? null,
-    workflowId,
-    version: versionId,
-    ...scopeClause,
-  }).lean();
+  const workflowVersion = await WorkflowVersion.findOne(
+    buildWorkflowVersionQuery(workflow, workflowId, versionId)
+  ).lean();
 
   if (!workflowVersion) {
     throw workflowVersionNotFoundError();
@@ -156,4 +212,8 @@ module.exports = {
   resolveWorkflowVersion,
   resolveWorkflowReference,
   normalizeWorkflowIdentity,
+  buildTenantWorkflowQuery,
+  buildWorkflowVersionQuery,
+  getWorkflowTenantIds,
+  getVersionTenantId,
 };

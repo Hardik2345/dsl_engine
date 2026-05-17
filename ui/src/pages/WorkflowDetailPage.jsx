@@ -21,6 +21,7 @@ import {
   useTenants,
   useWorkflowSchedules,
   useCreateWorkflowSchedule,
+  useCreateWorkflowBulkSchedule,
   usePauseWorkflowSchedule,
   useResumeWorkflowSchedule,
   useDeleteWorkflowSchedule,
@@ -32,9 +33,10 @@ import {
 import { useTenant } from '../context/TenantContext';
 import { Button, Badge, Card, CardHeader, CardContent, CardTitle, PageSpinner } from '../components/ui';
 import { format } from 'date-fns';
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import RunWorkflowModal from '../components/RunWorkflowModal';
 import EditWorkflowModal from '../components/EditWorkflowModal';
+import { getWorkflowKind, getWorkflowKindLabel, getWorkflowKindStatus } from '../utils/workflowKind';
 import toast from 'react-hot-toast';
 
 const SCHEDULE_WINDOW_MODES = {
@@ -72,6 +74,8 @@ export default function WorkflowDetailPage() {
   const { tenantId } = useTenant();
 
   const { data, isLoading, error } = useWorkflow(workflowId);
+  const workflow = data?.workflow;
+  const workflowKind = getWorkflowKind(workflow);
   const { data: tenants = [] } = useTenants();
   const { data: versions } = useWorkflowVersions(workflowId);
   const { data: schedules = [], isLoading: schedulesLoading } = useWorkflowSchedules(workflowId);
@@ -81,6 +85,7 @@ export default function WorkflowDetailPage() {
 
   const deleteWorkflow = useDeleteWorkflow();
   const createSchedule = useCreateWorkflowSchedule(workflowId);
+  const createBulkSchedule = useCreateWorkflowBulkSchedule(workflowId);
   const pauseSchedule = usePauseWorkflowSchedule(workflowId);
   const resumeSchedule = useResumeWorkflowSchedule(workflowId);
   const deleteSchedule = useDeleteWorkflowSchedule(workflowId);
@@ -96,6 +101,29 @@ export default function WorkflowDetailPage() {
   const [scheduleMode, setScheduleMode] = useState('simple');
   const [selectedPreset, setSelectedPreset] = useState('every_15m');
   const [customCronExpr, setCustomCronExpr] = useState('*/15 * * * *');
+  const [scheduleTargetTenantIds, setScheduleTargetTenantIds] = useState([]);
+  const [scheduleJobProgress, setScheduleJobProgress] = useState(null);
+
+  const targetableTenantIds = useMemo(() => {
+    if (workflowKind === 'global') {
+      return (Array.isArray(tenants) ? tenants : [])
+        .map((item) => item.tenantId)
+        .filter(Boolean)
+        .sort();
+    }
+
+    if (Array.isArray(workflow?.tenantIds) && workflow.tenantIds.length) {
+      return [...workflow.tenantIds].sort();
+    }
+
+    return [];
+  }, [workflowKind, tenants, workflow]);
+
+  useEffect(() => {
+    if ((workflowKind === 'multi_tenant' || workflowKind === 'global') && tenantId) {
+      setScheduleTargetTenantIds([tenantId]);
+    }
+  }, [workflowKind, tenantId]);
 
   if (isLoading) return <PageSpinner />;
 
@@ -110,7 +138,7 @@ export default function WorkflowDetailPage() {
     );
   }
 
-  const { workflow, version } = data || {};
+  const { version } = data || {};
   const definition = version?.definitionJson;
   const currentTenant = tenants.find((tenant) => tenant.tenantId === tenantId);
   const schedulerTimeZone = currentTenant?.settings?.timezone || 'UTC';
@@ -145,23 +173,56 @@ export default function WorkflowDetailPage() {
 
   const handleCreateSchedule = async (e) => {
     e.preventDefault();
+    setScheduleJobProgress(null);
 
     try {
       const cronExpr = scheduleMode === 'simple'
         ? SCHEDULE_PRESETS[selectedPreset].cronExpr
         : customCronExpr.trim();
 
-      await createSchedule.mutateAsync({
+      const supportsBulkSchedule = workflowKind === 'multi_tenant' || workflowKind === 'global';
+      const selectedTargets = supportsBulkSchedule
+        ? scheduleTargetTenantIds.filter((targetTenantId) => targetableTenantIds.includes(targetTenantId))
+        : [tenantId].filter(Boolean);
+
+      if (supportsBulkSchedule && !selectedTargets.length) {
+        toast.error('Select at least one tenant');
+        return;
+      }
+
+      const payload = {
         name: scheduleForm.name.trim() || undefined,
         cronExpr,
         overlapPolicy: scheduleForm.overlapPolicy,
-        timezone: schedulerTimeZone,
         windowMode: scheduleForm.windowMode
-      });
-      toast.success('Schedule created');
+      };
+
+      if (
+        supportsBulkSchedule
+        && !(selectedTargets.length === 1 && selectedTargets[0] === tenantId)
+      ) {
+        const result = await createBulkSchedule.mutateAsync({
+          ...payload,
+          tenantIds: selectedTargets,
+          onProgress: setScheduleJobProgress
+        });
+        if (result.failures?.length) {
+          const failedTenantList = result.failures.map((entry) => entry.tenantId).join(', ');
+          toast.error(`Failed to create schedule for: ${failedTenantList}`);
+        }
+        toast.success(`Schedule created for ${result.successes?.length || 0} tenant(s)`);
+      } else {
+        await createSchedule.mutateAsync({
+          ...payload,
+          timezone: schedulerTimeZone
+        });
+        toast.success('Schedule created');
+      }
       setScheduleForm((prev) => ({ ...prev, name: '' }));
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed to create schedule');
+    } finally {
+      setScheduleJobProgress(null);
     }
   };
 
@@ -209,6 +270,24 @@ export default function WorkflowDetailPage() {
   const workflowEvents = triggerEvents.filter((event) => event.matchedWorkflowId === workflowId);
   const workflowUnmatched = unmatchedAlerts.filter((alert) => alert.alertType === definition?.trigger?.alertType);
   const workflowDescription = definition?.description || 'No description';
+  const scheduleIsPending = createSchedule.isPending || createBulkSchedule.isPending;
+
+  const toggleScheduleTargetTenant = (targetTenantId) => {
+    setScheduleTargetTenantIds((prev) => {
+      if (prev.includes(targetTenantId)) {
+        return prev.filter((item) => item !== targetTenantId);
+      }
+      return [...prev, targetTenantId];
+    });
+  };
+
+  const selectAllScheduleTargets = () => {
+    setScheduleTargetTenantIds(targetableTenantIds);
+  };
+
+  const selectCurrentScheduleTarget = () => {
+    setScheduleTargetTenantIds(tenantId ? [tenantId] : []);
+  };
 
   return (
     <div>
@@ -223,7 +302,14 @@ export default function WorkflowDetailPage() {
       <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between mb-6">
         <div className="min-w-0 flex-1 max-w-2xl">
           <h1 className="text-2xl font-bold text-gray-900">{workflow?.name || workflowId}</h1>
-          <p className="text-xs text-gray-400 font-mono mt-1">{workflowId}</p>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <p className="text-xs text-gray-400 font-mono">{workflowId}</p>
+            {workflow && (
+              <Badge status={getWorkflowKindStatus(workflow)}>
+                {getWorkflowKindLabel(workflow)}
+              </Badge>
+            )}
+          </div>
           <p className="mt-3 max-w-xl text-[15px] leading-7 text-gray-500 line-clamp-2">
             {workflowDescription}
           </p>
@@ -277,6 +363,12 @@ export default function WorkflowDetailPage() {
                 <div>
                   <dt className="text-sm text-gray-500">Type</dt>
                   <dd className="font-medium">{definition?.workflow_type || '-'}</dd>
+                </div>
+                <div>
+                  <dt className="text-sm text-gray-500">Workflow Scope</dt>
+                  <dd className="font-medium">
+                    {workflow ? getWorkflowKindLabel(workflow) : '-'}
+                  </dd>
                 </div>
                 <div>
                   <dt className="text-sm text-gray-500">Latest Version</dt>
@@ -364,17 +456,78 @@ export default function WorkflowDetailPage() {
                     {SCHEDULE_WINDOW_MODES[scheduleForm.windowMode].description}
                   </p>
                 </div>
+                {(workflowKind === 'multi_tenant' || workflowKind === 'global') && targetableTenantIds.length > 0 && (
+                  <div className="md:col-span-12 border border-gray-200 rounded-lg p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                      <label className="block text-xs text-gray-500">Target Tenants</label>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={selectCurrentScheduleTarget}
+                          className="h-8 px-3 rounded-lg border border-gray-300 bg-white text-xs text-gray-700"
+                        >
+                          Current
+                        </button>
+                        <button
+                          type="button"
+                          onClick={selectAllScheduleTargets}
+                          className="h-8 px-3 rounded-lg border border-gray-300 bg-white text-xs text-gray-700"
+                        >
+                          All
+                        </button>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                      {targetableTenantIds.map((targetTenantId) => (
+                        <label
+                          key={targetTenantId}
+                          className="flex items-center gap-2 rounded border border-gray-200 bg-white px-3 py-2 text-sm"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={scheduleTargetTenantIds.includes(targetTenantId)}
+                            onChange={() => toggleScheduleTargetTenant(targetTenantId)}
+                          />
+                          <span className="truncate" title={targetTenantId}>{targetTenantId}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <div className="md:col-span-2 flex items-end">
                   <Button
                     type="submit"
                     size="sm"
                     className="w-full h-10 whitespace-nowrap"
-                    loading={createSchedule.isPending}
+                    loading={scheduleIsPending}
                   >
                     <CalendarPlus className="w-4 h-4 mr-2" />
                     Add Schedule
                   </Button>
                 </div>
+                {scheduleJobProgress && (
+                  <div className="md:col-span-12 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
+                    <div className="flex items-center justify-between gap-3 text-sm">
+                      <span className="font-medium text-blue-900">
+                        Creating schedules: {scheduleJobProgress.status}
+                      </span>
+                      <span className="text-blue-700">
+                        {scheduleJobProgress.processedCount || 0}/{scheduleJobProgress.totalCount || 0}
+                        {scheduleJobProgress.failureCount ? `, ${scheduleJobProgress.failureCount} failed` : ''}
+                      </span>
+                    </div>
+                    <div className="mt-2 h-2 rounded-full bg-blue-100 overflow-hidden">
+                      <div
+                        className="h-full bg-blue-600 transition-all"
+                        style={{
+                          width: `${scheduleJobProgress.totalCount
+                            ? Math.min(100, ((scheduleJobProgress.processedCount || 0) / scheduleJobProgress.totalCount) * 100)
+                            : 0}%`
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
 
                 {scheduleMode === 'simple' ? (
                   <div className="md:col-span-12">
