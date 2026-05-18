@@ -42,11 +42,19 @@ import toast from 'react-hot-toast';
 const SCHEDULE_WINDOW_MODES = {
   previous_complete_day: {
     label: 'Previous Complete Day',
-    description: 'Current window is the previous full UTC day; baseline is the day before that.'
+    description: 'Current window is the previous full day in the schedule timezone; baseline is the day before that.'
   },
   day_to_date_vs_previous_day: {
     label: 'Today Until Scheduled Time vs Yesterday',
     description: 'Current window is 00:00 to the scheduled hour; baseline is yesterday 00:00 to the same hour. Minute offsets are ignored.'
+  },
+  previous_complete_30_days: {
+    label: 'Previous Complete 30 Days',
+    description: 'Current window is the previous 30 complete days; baseline is the 30 days before that.'
+  },
+  day_to_date_vs_last_30_days_average: {
+    label: 'Today vs Last 30-Day Average',
+    description: 'Current window is today up to the scheduled hour; baseline is the average of the same hours over the previous 30 days.'
   }
 };
 
@@ -544,9 +552,10 @@ export default function WorkflowDetailPage() {
                     <p className="text-xs text-gray-500 mt-2">
                       {SCHEDULE_PRESETS[selectedPreset].description} ({SCHEDULE_PRESETS[selectedPreset].cronExpr} {schedulerTimeZone})
                     </p>
-                    {scheduleForm.windowMode === 'day_to_date_vs_previous_day' && (
+                    {(scheduleForm.windowMode === 'day_to_date_vs_previous_day'
+                      || scheduleForm.windowMode === 'day_to_date_vs_last_30_days_average') && (
                       <p className="text-xs text-amber-700 mt-1">
-                        Day-to-date analysis snaps to the scheduled hour. For example, a `09:03` run analyzes `00:00 → 09:00`.
+                        Day-to-date analysis snaps to the scheduled hour. For example, a 09:03 run analyzes 00:00 to 09:00 and excludes the current partial hour.
                       </p>
                     )}
                   </div>
@@ -565,9 +574,10 @@ export default function WorkflowDetailPage() {
                       Format: minute hour day-of-month month day-of-week.
                       Example: <span className="font-mono">0 9 * * 1-5</span> runs weekdays at 09:00 {schedulerTimeZone}.
                     </p>
-                    {scheduleForm.windowMode === 'day_to_date_vs_previous_day' && (
+                    {(scheduleForm.windowMode === 'day_to_date_vs_previous_day'
+                      || scheduleForm.windowMode === 'day_to_date_vs_last_30_days_average') && (
                       <p className="text-xs text-amber-700 mt-1">
-                        For this window mode, minute offsets are allowed. The analysis cutoff is floored to the hour.
+                        For this window mode, minute offsets are allowed. The analysis cutoff is floored to the hour and the current partial hour is excluded.
                       </p>
                     )}
                   </div>
