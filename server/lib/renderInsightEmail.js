@@ -36,12 +36,102 @@ function colorizeNumericText(value) {
   });
 }
 
+function splitDetailLines(value) {
+  return String(value || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function formatLargeIntegers(value) {
+  return String(value || '')
+    .replace(/\s*->\s*/g, ' → ')
+    .replace(/\b\d{4,}\b/g, (token) => Number(token).toLocaleString('en-US'));
+}
+
+function parseMetricSegment(segment) {
+  const normalized = formatLargeIntegers(segment);
+  const metricMatch = normalized.match(/^([^\d+-]*?)([+-]?\d.*)$/);
+  const label = metricMatch?.[1]?.trim() || '';
+  const rawValue = metricMatch?.[2]?.trim() || normalized;
+  const deltaMatch = rawValue.match(/^(.*?)\s+\((?:change\s+)?([+-]?\d+(?:\.\d+)?%)\)$/i);
+
+  if (!deltaMatch) {
+    return { label, value: rawValue, delta: null, deltaValue: null };
+  }
+
+  const deltaValue = Number(deltaMatch[2].replace('%', ''));
+  return {
+    label,
+    value: deltaMatch[1].trim(),
+    delta: `${deltaValue > 0 ? '+' : ''}${deltaMatch[2]}`,
+    deltaValue,
+  };
+}
+
+function parseRankedItem(item) {
+  const match = String(item || '').match(/^(\d+)\.\s+(.+)$/);
+  if (!match) return null;
+
+  const parts = match[2].split(' | ').map((part) => part.trim()).filter(Boolean);
+  return {
+    rank: Number(match[1]),
+    label: parts[0] || `Rank ${match[1]}`,
+    metrics: parts.slice(1).map(parseMetricSegment),
+  };
+}
+
+function renderDeltaBadge(metric) {
+  if (!metric.delta) return '';
+  const color = metric.deltaValue > 0
+    ? '#047857'
+    : metric.deltaValue < 0
+      ? '#b91c1c'
+      : '#475569';
+  const background = metric.deltaValue > 0
+    ? '#ecfdf5'
+    : metric.deltaValue < 0
+      ? '#fef2f2'
+      : '#f1f5f9';
+
+  return `<span style="display:inline-block;margin-left:6px;padding:2px 6px;border-radius:3px;background:${background};color:${color} !important;-webkit-text-fill-color:${color};font-size:11px;font-weight:700;white-space:nowrap;">${escapeHtml(metric.delta)}</span>`;
+}
+
+function renderRankedEntry(entry) {
+  return `
+    <div style="margin-top:10px;padding:12px;border:1px solid #dbe3ee;border-radius:4px;background:#ffffff;">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse:collapse;">
+        <tr>
+          <td valign="top" style="width:28px;padding-right:10px;">
+            <div style="width:24px;height:24px;border-radius:4px;background:#dbeafe;color:#1d4ed8;font-size:12px;font-weight:800;line-height:24px;text-align:center;">${entry.rank}</div>
+          </td>
+          <td valign="top">
+            <div style="font-size:14px;line-height:1.4;font-weight:700;color:#0f172a;word-break:break-word;">${escapeHtml(entry.label)}</div>
+            ${entry.metrics.length ? `
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-top:8px;border-collapse:collapse;">
+                ${entry.metrics.map((metric) => `
+                  <tr>
+                    <td valign="top" style="width:70px;padding:5px 10px 5px 0;border-top:1px solid #eef2f7;font-size:10px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:#64748b;white-space:nowrap;">${escapeHtml(metric.label || 'Value')}</td>
+                    <td valign="top" align="right" style="padding:5px 0;border-top:1px solid #eef2f7;font-size:12px;line-height:1.5;font-weight:600;color:#1e293b;font-variant-numeric:tabular-nums;">${escapeHtml(metric.value)}${renderDeltaBadge(metric)}</td>
+                  </tr>
+                `).join('')}
+              </table>
+            ` : ''}
+          </td>
+        </tr>
+      </table>
+    </div>
+  `;
+}
+
 function renderDetailCard(detail, index) {
   const parsed = normalizeDetail(detail);
   const title = parsed.title;
   const metricLines = parsed.items;
+  const rankedEntries = metricLines.map(parseRankedItem).filter(Boolean);
   const metricRows = metricLines
     .map((line) => {
+      if (parseRankedItem(line)) return null;
       const separatorIndex = line.indexOf(':');
       if (separatorIndex === -1) {
         return null;
@@ -52,7 +142,7 @@ function renderDetailCard(detail, index) {
       return { label, value };
     })
     .filter(Boolean);
-  const looseLines = metricLines.filter((line) => !line.includes(':'));
+  const looseLines = metricLines.filter((line) => !line.includes(':') && !parseRankedItem(line));
 
   return `
     <div style="margin-bottom:12px;padding:18px 20px;border:1px solid #d9e1ec;border-radius:4px;background:#f8fafc;">
@@ -65,6 +155,7 @@ function renderDetailCard(detail, index) {
           </td>
           <td valign="top">
             <div style="font-size:19px;line-height:1.35;font-weight:650;color:#0f172a;letter-spacing:-0.01em;">${escapeHtml(title)}</div>
+            ${rankedEntries.length ? rankedEntries.map(renderRankedEntry).join('') : ''}
             ${metricRows.length ? `
               <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-top:12px;border-collapse:collapse;">
                 ${metricRows.map((row) => `
@@ -97,7 +188,7 @@ function normalizeDetail(detail) {
   if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
     const title = String(detail.title || '').trim();
     const items = Array.isArray(detail.items)
-      ? detail.items.map((item) => String(item || '').trim()).filter(Boolean)
+      ? detail.items.flatMap(splitDetailLines)
       : [];
     return { title, items };
   }

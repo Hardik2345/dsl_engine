@@ -232,7 +232,7 @@ function renderTemplateDetailEntry(entry, ctx) {
   const title = renderTemplateDetail(entry.title, ctx);
   const items = Array.isArray(entry.items)
     ? entry.items
-      .map((item) => renderTemplateDetail(item, ctx))
+      .flatMap((item) => splitRenderedDetailLines(renderTemplateDetail(item, ctx)))
       .filter(Boolean)
     : [];
 
@@ -244,6 +244,13 @@ function renderTemplateDetailEntry(entry, ctx) {
     title,
     items
   };
+}
+
+function splitRenderedDetailLines(value) {
+  return String(value || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
 }
 
 function hasConfiguredDetailContent(entry) {

@@ -4,18 +4,7 @@ import { useTenant } from '../context/TenantContext';
 import { Card, PageSpinner, EmptyState, Badge } from '../components/ui';
 import { format } from 'date-fns';
 import { Link } from 'react-router-dom';
-
-function formatInsightDetail(detail) {
-  if (typeof detail === 'string') return detail;
-  if (!detail || typeof detail !== 'object' || Array.isArray(detail)) return String(detail || '');
-
-  const title = String(detail.title || '').trim();
-  const items = Array.isArray(detail.items)
-    ? detail.items.map((item) => String(item || '').trim()).filter(Boolean)
-    : [];
-
-  return [title, ...items].filter(Boolean).join(' | ');
-}
+import InsightDetail from '../components/InsightDetail';
 
 export default function InsightsPage() {
   const { tenantId } = useTenant();
@@ -63,16 +52,16 @@ export default function InsightsPage() {
                     </h3>
                   </div>
                   {insight.details?.length > 0 && (
-                    <ul className="text-sm text-gray-600 ml-7 space-y-1">
+                    <div className="ml-7 mt-3 space-y-2">
                       {insight.details.slice(0, 3).map((detail, idx) => (
-                        <li key={idx}>• {formatInsightDetail(detail)}</li>
+                        <InsightDetail key={idx} detail={detail} maxItems={3} />
                       ))}
                       {insight.details.length > 3 && (
-                        <li className="text-gray-400">
+                        <div className="text-sm text-gray-400">
                           +{insight.details.length - 3} more...
-                        </li>
+                        </div>
                       )}
-                    </ul>
+                    </div>
                   )}
                 </div>
                 <div className="text-right text-sm">

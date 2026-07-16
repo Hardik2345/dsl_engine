@@ -3,6 +3,7 @@ import { ArrowLeft, Clock, CheckCircle, XCircle, AlertCircle } from 'lucide-reac
 import { format } from 'date-fns';
 import { useRun } from '../api/hooks';
 import { Badge, Card, CardHeader, CardContent, CardTitle, PageSpinner } from '../components/ui';
+import InsightDetail from '../components/InsightDetail';
 import { useState } from 'react';
 
 export default function RunDetailPage() {
@@ -53,25 +54,6 @@ export default function RunDetailPage() {
     if (!text || typeof text !== 'string') return '';
     if (text.length <= max) return text;
     return `${text.slice(0, max - 1)}…`;
-  };
-  const renderStructuredInsightDetail = (detail, idx) => {
-    const title = String(detail?.title || '').trim();
-    const items = Array.isArray(detail?.items)
-      ? detail.items.map((item) => String(item || '').trim()).filter(Boolean)
-      : [];
-
-    return (
-      <li key={idx} className="text-xs text-primary-800">
-        {title && <div className="font-medium">{truncate(title, 200)}</div>}
-        {items.length > 0 && (
-          <ul className="list-disc list-inside ml-4 mt-1 space-y-0.5">
-            {items.map((item, itemIdx) => (
-              <li key={itemIdx}>{truncate(item, 220)}</li>
-            ))}
-          </ul>
-        )}
-      </li>
-    );
   };
   const renderRankedList = (text) => {
     if (!text || typeof text !== 'string') return null;
@@ -364,60 +346,11 @@ export default function RunDetailPage() {
                 </div>
                 
                 {finalInsight.details && finalInsight.details.length > 0 && (
-                   <ul className="list-disc list-inside space-y-1 mb-3">
-                      {finalInsight.details.map((detail, idx) => {
-                        if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
-                          return renderStructuredInsightDetail(detail, idx);
-                        }
-
-                        const lines = detail.split('\n').filter(Boolean);
-                        if (lines.length <= 1) {
-                          return (
-                            <li key={idx} className="text-xs text-primary-800">
-                              {truncate(detail, 260)}
-                            </li>
-                          );
-                        }
-
-                        const [header, ...items] = lines;
-                        const listItems = items.filter((line) => /^\d+\.\s+/.test(line));
-                        const fallbackItems = items.filter((line) => !/^\d+\.\s+/.test(line));
-
-                        return (
-                          <li key={idx} className="text-xs text-primary-800">
-                            <span>{truncate(header, 200)}</span>
-                            {listItems.length > 0 && (
-                              <ol className="list-decimal list-inside mt-1 space-y-1 ml-4">
-                                {listItems.map((line, lineIdx) => {
-                                  const content = line.replace(/^\d+\.\s+/, '');
-                                  const parts = content.split(' | ').map((part) => part.trim()).filter(Boolean);
-                                  const [title, ...rest] = parts;
-                                  return (
-                                    <li key={lineIdx}>
-                                      <span>{truncate(title, 140)}</span>
-                                      {rest.length > 0 && (
-                                        <ul className="list-disc list-inside ml-4 mt-0.5 space-y-0.5">
-                                          {rest.map((item, itemIdx) => (
-                                            <li key={itemIdx}>{truncate(item, 160)}</li>
-                                          ))}
-                                        </ul>
-                                      )}
-                                    </li>
-                                  );
-                                })}
-                              </ol>
-                            )}
-                            {fallbackItems.length > 0 && (
-                              <div className="mt-1 space-y-0.5">
-                                {fallbackItems.map((line, lineIdx) => (
-                                  <div key={lineIdx}>{line}</div>
-                                ))}
-                              </div>
-                            )}
-                          </li>
-                        );
-                      })}
-                   </ul>
+                   <div className="space-y-3 mb-3">
+                      {finalInsight.details.map((detail, idx) => (
+                        <InsightDetail key={idx} detail={detail} compact />
+                      ))}
+                   </div>
                 )}
 
                 {finalInsight.confidence !== undefined && finalInsight.confidence !== null && (
