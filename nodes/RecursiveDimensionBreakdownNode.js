@@ -105,6 +105,7 @@ async function RecursiveDimensionBreakdownNode(def, context) {
       dimension: activeDimension,
       window: meta.window,
       baselineWindow: meta.baselineWindow,
+      timezone: meta.timezone,
       filters: scopedFilters,
       includeOrders
     });

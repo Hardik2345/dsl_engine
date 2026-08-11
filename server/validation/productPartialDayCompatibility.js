@@ -2,6 +2,7 @@ const {
   isPartialDayWindow,
   listHourlyProductUnsupportedFilters,
   listHourlyLandingPagePathUnsupportedFilters,
+  normalizeWindowForQuery,
 } = require('../../lib/timeWindowUtils');
 
 function getRecursiveDimensions(node) {
@@ -89,10 +90,13 @@ function validateRunContextAgainstWorkflow(context, definition) {
   const errors = [];
   const window = context?.meta?.window;
   const baselineWindow = context?.meta?.baselineWindow;
+  const timezone = context?.meta?.timezone;
+  const normalizedWindow = normalizeWindowForQuery(window, timezone);
+  const normalizedBaselineWindow = normalizeWindowForQuery(baselineWindow, timezone);
 
   const usesPartialDayProductPath = (
-    isPartialDayWindow(window?.start, window?.end)
-    || isPartialDayWindow(baselineWindow?.start, baselineWindow?.end)
+    isPartialDayWindow(normalizedWindow?.start, normalizedWindow?.end)
+    || isPartialDayWindow(normalizedBaselineWindow?.start, normalizedBaselineWindow?.end)
   );
 
   if (!usesPartialDayProductPath) {

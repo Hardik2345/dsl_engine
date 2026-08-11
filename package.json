@@ -9,7 +9,7 @@
   "scripts": {
     "start": "nodemon server.js",
     "start:worker": "nodemon scheduler/worker.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test tests/*.test.js"
   },
   "dependencies": {
     "@xyflow/react": "^12.10.0",

@@ -4,6 +4,7 @@ const WorkflowSchedule = require('../../server/models/WorkflowSchedule');
 const TriggerEvent = require('../../server/models/TriggerEvent');
 const UnmatchedAlert = require('../../server/models/UnmatchedAlert');
 const MissedTrigger = require('../../server/models/MissedTrigger');
+const Tenant = require('../../server/models/Tenant');
 const { selectWorkflowMatches } = require('../domain/triggerMatcher');
 const {
   getNextRunAt,
@@ -40,19 +41,25 @@ async function getWorkflowCandidates(tenantId, includeGlobal = true) {
   return candidates.filter(item => item.definition);
 }
 
-function buildDefaultContext(tenantId, payload) {
+function buildDefaultContext(tenantId, payload, timezone = 'UTC') {
   const now = new Date().toISOString();
   const bodyContext = payload?.context;
   if (bodyContext && typeof bodyContext === 'object') {
-    bodyContext.meta = bodyContext.meta || {};
-    bodyContext.meta.tenantId = bodyContext.meta.tenantId || tenantId;
-    return bodyContext;
+    return {
+      ...bodyContext,
+      meta: {
+        ...bodyContext.meta,
+        tenantId,
+        timezone
+      }
+    };
   }
 
   return {
     meta: {
       tenantId,
       metric: payload?.metric || 'cvr',
+      timezone,
       triggeredAt: payload?.occurredAt || now,
       window: payload?.window || { start: now, end: now },
       baselineWindow: payload?.baselineWindow || { start: now, end: now }
@@ -105,6 +112,7 @@ function buildPreviousCompleteDayContext(tenantId, triggerTime, payload = {}, ti
     meta: {
       tenantId,
       metric: payload?.metric || 'cvr',
+      timezone: timeZone,
       triggeredAt: toIsoUtc(triggerDate),
       window: {
         start: toIsoUtc(previousDayStart),
@@ -155,6 +163,7 @@ function buildDayToDateVsPreviousDayContext(tenantId, triggerTime, payload = {},
     meta: {
       tenantId,
       metric: payload?.metric || 'cvr',
+      timezone: timeZone,
       triggeredAt: toIsoUtc(triggerDate),
       window: {
         start: toIsoUtc(currentDayStart),
@@ -241,10 +250,12 @@ async function ingestEventTrigger({ tenantId, body }) {
     return { duplicate: false, triggerEvent, run: null, unmatched: true };
   }
 
+  const tenant = await Tenant.findOne({ tenantId }).lean();
+  const timezone = tenant?.settings?.timezone || 'UTC';
   const context = buildDefaultContext(tenantId, {
     ...body.payload,
     occurredAt: triggerEvent.occurredAt
-  });
+  }, timezone);
 
   const enqueued = [];
   const skipped = [];
@@ -512,6 +523,10 @@ async function replayMissedTriggers(scheduleId) {
 }
 
 module.exports = {
+  buildDefaultContext,
+  buildPreviousCompleteDayContext,
+  buildDayToDateVsPreviousDayContext,
+  buildCronContext,
   ingestEventTrigger,
   createSchedule,
   evaluateDueSchedules,

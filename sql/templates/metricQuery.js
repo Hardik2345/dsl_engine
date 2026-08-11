@@ -1,13 +1,13 @@
 // sql/templates/metricQuery.js
 const { normalizeWindowForQuery } = require('../../lib/timeWindowUtils');
 
-module.exports = function metricQuery({ tenantId, metrics = [], window, baselineWindow }) {
+module.exports = function metricQuery({ tenantId, metrics = [], window, baselineWindow, timezone }) {
   if (!tenantId) throw new Error('metricQuery: tenantId is required (db selector)');
   if (!window?.start || !window?.end) throw new Error('metricQuery: window.start/window.end required');
   if (!baselineWindow?.start || !baselineWindow?.end) throw new Error('metricQuery: baselineWindow.start/window.end required');
 
-  const normalizedWindow = normalizeWindowForQuery(window);
-  const normalizedBaselineWindow = normalizeWindowForQuery(baselineWindow);
+  const normalizedWindow = normalizeWindowForQuery(window, timezone);
+  const normalizedBaselineWindow = normalizeWindowForQuery(baselineWindow, timezone);
   const windowStart = normalizedWindow.start;
   const windowEnd = normalizedWindow.end;
   const baselineStart = normalizedBaselineWindow.start;

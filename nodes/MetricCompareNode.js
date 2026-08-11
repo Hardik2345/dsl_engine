@@ -2,14 +2,15 @@ const queryBuilder = require('../sql/QueryBuilder');
 const queryExecutor = require('../sql/QueryExecutor');
 
 async function MetricCompareNode(def, context) {
-  const { window, baselineWindow, tenantId } = context.meta || {};
+  const { window, baselineWindow, tenantId, timezone } = context.meta || {};
 
   // --- 1. Build query specs (intent only) ---
   const querySpec = queryBuilder.buildMetricQuery({
     tenantId,
     metrics: def.metrics,
     window,
-    baselineWindow
+    baselineWindow,
+    timezone
   });
 
   // --- 2. Execute queries (execution only) ---

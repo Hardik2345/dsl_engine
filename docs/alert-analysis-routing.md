@@ -14,11 +14,25 @@ The routing lives in [`sql/templates/dimensionBreakdownQuery.js`](/Users/hardik/
 
 ## Routing Summary
 
+Before choosing a path, the engine converts the current and baseline windows into
+the effective run timezone stored in `context.meta.timezone`. Completed local
+calendar days are therefore recognized even when their input timestamps are UTC
+instants with non-midnight boundaries.
+
 The engine chooses the path in this order:
 
 1. If `dimension === 'product_id'` and either the analysis window or baseline window is partial-day, use the hourly product rollup path.
 2. Else if `dimension === 'landing_page_path'` and either the analysis window or baseline window is partial-day, use the hourly landing-page attribution path.
 3. Else use the default daily path.
+
+Timezone authority depends on the run type:
+
+- cron runs use the schedule timezone
+- alert and manual runs use the tenant timezone
+- reruns preserve the original run timezone, falling back to the tenant timezone
+  for legacy contexts
+- already-queued legacy contexts without timezone metadata retain the historical
+  `Asia/Kolkata` execution fallback
 
 The main routing helpers are:
 

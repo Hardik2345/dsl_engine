@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { X, Play } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { useExecuteWorkflow, useWorkflow } from '../api/hooks';
+import { useExecuteWorkflow, useTenants, useWorkflow } from '../api/hooks';
 import { useTenant } from '../context/TenantContext';
 import { Button } from './ui';
 import {
@@ -12,41 +12,70 @@ import {
   validateRunDateRanges
 } from '../utils/workflowValidation';
 
+function getDatePartsInTimeZone(date, timeZone) {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  });
+  const parts = Object.fromEntries(
+    formatter.formatToParts(date)
+      .filter((part) => part.type !== 'literal')
+      .map((part) => [part.type, part.value])
+  );
+  return { year: Number(parts.year), month: Number(parts.month), day: Number(parts.day) };
+}
+
+function midnightInputForDayOffset(date, timeZone, dayOffset) {
+  const parts = getDatePartsInTimeZone(date, timeZone);
+  const shifted = new Date(Date.UTC(parts.year, parts.month - 1, parts.day + dayOffset));
+  return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, '0')}-${String(shifted.getUTCDate()).padStart(2, '0')}T00:00`;
+}
+
+function wallClockTimestamp(value) {
+  const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);
+  if (!match) return NaN;
+  return Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4]), Number(match[5]));
+}
+
+function formatWallClockTimestamp(value) {
+  const date = new Date(value);
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}T${String(date.getUTCHours()).padStart(2, '0')}:${String(date.getUTCMinutes()).padStart(2, '0')}`;
+}
+
 export default function RunWorkflowModal({ workflow, onClose }) {
   const navigate = useNavigate();
   const { tenantId } = useTenant();
+  const { data: tenants = [] } = useTenants();
+  const currentTenant = tenants.find((tenant) => tenant.tenantId === tenantId);
+  const tenantTimezone = currentTenant?.settings?.timezone || 'UTC';
   const executeWorkflow = useExecuteWorkflow(workflow.workflowId);
   const { data: workflowData } = useWorkflow(workflow.workflowId);
-
-  const now = new Date();
-  const startOfLocalDay = (date) => {
-    const next = new Date(date);
-    next.setHours(0, 0, 0, 0);
-    return next;
-  };
-  const todayStart = startOfLocalDay(now);
-  const yesterdayStart = new Date(todayStart.getTime() - 24 * 60 * 60 * 1000);
-  const dayBeforeYesterdayStart = new Date(todayStart.getTime() - 2 * 24 * 60 * 60 * 1000);
-
-  const formatDateForInput = (date) => {
-    // Offset manual calculation to preserve local time (IST) in ISO format
-    const tzOffset = date.getTimezoneOffset() * 60000;
-    return new Date(date.getTime() - tzOffset).toISOString().slice(0, 16);
-  };
 
   const formatDateForApi = (dateStr) => {
     return dateStr.replace('T', ' ') + ':00';
   };
 
   const [formData, setFormData] = useState({
-    windowStart: formatDateForInput(yesterdayStart),
-    windowEnd: formatDateForInput(todayStart),
-    baselineStart: formatDateForInput(dayBeforeYesterdayStart),
-    baselineEnd: formatDateForInput(yesterdayStart),
+    windowStart: midnightInputForDayOffset(new Date(), tenantTimezone, -1),
+    windowEnd: midnightInputForDayOffset(new Date(), tenantTimezone, 0),
+    baselineStart: midnightInputForDayOffset(new Date(), tenantTimezone, -2),
+    baselineEnd: midnightInputForDayOffset(new Date(), tenantTimezone, -1),
   });
 
   const [usePreviousPeriod, setUsePreviousPeriod] = useState(false);
   const [previousBaselineDates, setPreviousBaselineDates] = useState(null);
+
+  useEffect(() => {
+    const now = new Date();
+    setFormData({
+      windowStart: midnightInputForDayOffset(now, tenantTimezone, -1),
+      windowEnd: midnightInputForDayOffset(now, tenantTimezone, 0),
+      baselineStart: midnightInputForDayOffset(now, tenantTimezone, -2),
+      baselineEnd: midnightInputForDayOffset(now, tenantTimezone, -1),
+    });
+  }, [tenantTimezone]);
 
   const handleCheckboxChange = (e) => {
     const checked = e.target.checked;
@@ -70,18 +99,18 @@ export default function RunWorkflowModal({ workflow, onClose }) {
 
   useEffect(() => {
     if (usePreviousPeriod && formData.windowStart && formData.windowEnd) {
-      const start = new Date(formData.windowStart);
-      const end = new Date(formData.windowEnd);
-      const duration = end.getTime() - start.getTime();
+      const start = wallClockTimestamp(formData.windowStart);
+      const end = wallClockTimestamp(formData.windowEnd);
+      const duration = end - start;
 
       if (duration > 0) {
         const baselineEnd = start;
-        const baselineStart = new Date(start.getTime() - duration);
+        const baselineStart = start - duration;
 
         setFormData(prev => ({
           ...prev,
-          baselineStart: formatDateForInput(baselineStart),
-          baselineEnd: formatDateForInput(baselineEnd)
+          baselineStart: formatWallClockTimestamp(baselineStart),
+          baselineEnd: formatWallClockTimestamp(baselineEnd)
         }));
       }
     }
@@ -115,6 +144,7 @@ export default function RunWorkflowModal({ workflow, onClose }) {
       meta: {
         tenantId,
         metric: 'cvr',
+        timezone: tenantTimezone,
         window: {
           start: formatDateForApi(formData.windowStart),
           end: formatDateForApi(formData.windowEnd),
@@ -169,6 +199,7 @@ export default function RunWorkflowModal({ workflow, onClose }) {
           <div className="px-6 py-4 space-y-4">
             <div className="text-sm text-gray-500 mb-4">
               Running <span className="font-medium text-gray-900">{workflow.workflowId}</span>
+              <span className="block mt-1">Times are interpreted in {tenantTimezone}.</span>
             </div>
 
             {/* Analysis Window */}

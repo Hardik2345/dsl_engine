@@ -2,6 +2,7 @@ const {
   parseSqlDateTime,
   isHourAligned,
   hasPositiveDuration,
+  isSupportedTimeZone,
 } = require('../../lib/timeWindowUtils');
 
 function validateRunContext(context) {
@@ -14,8 +15,11 @@ function validateRunContext(context) {
   if (!context.meta || typeof context.meta !== 'object') {
     errors.push('context.meta is required');
   } else {
-    const { tenantId, window, baselineWindow } = context.meta;
+    const { tenantId, timezone, window, baselineWindow } = context.meta;
     if (!tenantId) errors.push('context.meta.tenantId is required');
+    if (!isSupportedTimeZone(timezone)) {
+      errors.push('context.meta.timezone must be a supported IANA timezone');
+    }
     if (!window?.start || !window?.end) errors.push('context.meta.window.start/end required');
     if (!baselineWindow?.start || !baselineWindow?.end) {
       errors.push('context.meta.baselineWindow.start/end required');

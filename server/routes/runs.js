@@ -7,6 +7,8 @@ const {
 const { resolveWorkflowVersion, executeRun } = require('../services/workflowExecutionService');
 const { enqueueRun } = require('../../scheduler/app/runQueueService');
 const { normalizeRerunContext } = require('../../lib/timeWindowUtils');
+const Tenant = require('../models/Tenant');
+const { resolveManualRunTimezone } = require('../../lib/runTimezone');
 
 const router = express.Router({ mergeParams: true });
 
@@ -15,7 +17,25 @@ router.post('/:workflowId/runs', async (req, res, next) => {
     const { tenantId, workflowId } = req.params;
     const { version, context, rerun } = req.body || {};
     const mode = req.query.mode === 'async' ? 'async' : 'sync';
-    const effectiveContext = rerun ? normalizeRerunContext(context) : context;
+    const tenant = await Tenant.findOne({ tenantId }).lean();
+    if (!tenant) return res.status(404).json({ error: 'tenant not found' });
+
+    const effectiveTimezone = resolveManualRunTimezone({
+      rerun,
+      contextTimezone: context?.meta?.timezone,
+      tenantTimezone: tenant.settings?.timezone
+    });
+    const contextWithTimezone = {
+      ...(context || {}),
+      meta: {
+        ...(context?.meta || {}),
+        tenantId,
+        timezone: effectiveTimezone
+      }
+    };
+    const effectiveContext = rerun
+      ? normalizeRerunContext(contextWithTimezone, effectiveTimezone)
+      : contextWithTimezone;
 
     const { ok, errors } = validateRunContext(effectiveContext);
     if (!ok) return res.status(400).json({ errors });

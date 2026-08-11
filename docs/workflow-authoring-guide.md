@@ -540,6 +540,7 @@ Manual run context must be an object with:
   "meta": {
     "tenantId": "brand_a",
     "metric": "cvr",
+    "timezone": "Asia/Kolkata",
     "window": {
       "start": "2026-03-26 00:00:00",
       "end": "2026-03-27 00:00:00"
@@ -560,6 +561,7 @@ Validation rules:
 
 - `context.meta` is required
 - `context.meta.tenantId` is required
+- `context.meta.timezone` is resolved by the server and must be a supported IANA timezone
 - `context.meta.window.start/end` are required
 - `context.meta.baselineWindow.start/end` are required
 - `baselineWindow.type` is explicitly not allowed
@@ -610,6 +612,7 @@ A window is partial-day when:
 
 - it is hour-aligned
 - but it is not midnight-to-midnight across a whole number of days
+- its boundaries have first been normalized into `context.meta.timezone`
 
 Examples:
 

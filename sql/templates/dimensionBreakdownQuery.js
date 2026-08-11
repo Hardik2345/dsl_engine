@@ -430,6 +430,7 @@ module.exports = function dimensionBreakdownQuery({
   dimension,
   window,
   baselineWindow,
+  timezone,
   filters = [],
   includeOrders = true
 }) {
@@ -439,8 +440,18 @@ module.exports = function dimensionBreakdownQuery({
 
   assertSafeDimension(dimension);
 
-  const useHourlyProductRollup = shouldUseHourlyProductRollup({ dimension, window, baselineWindow });
-  const useHourlyLandingPagePathAttribution = shouldUseHourlyLandingPagePathAttribution({ dimension, window, baselineWindow });
+  const normalizedWindow = normalizeWindowForQuery(window, timezone);
+  const normalizedBaselineWindow = normalizeWindowForQuery(baselineWindow, timezone);
+  const useHourlyProductRollup = shouldUseHourlyProductRollup({
+    dimension,
+    window: normalizedWindow,
+    baselineWindow: normalizedBaselineWindow
+  });
+  const useHourlyLandingPagePathAttribution = shouldUseHourlyLandingPagePathAttribution({
+    dimension,
+    window: normalizedWindow,
+    baselineWindow: normalizedBaselineWindow
+  });
   const { whereSql: filterSql, params: filterParams } = useHourlyProductRollup
     ? buildHourlyProductFilterWhere(filters)
     : useHourlyLandingPagePathAttribution
@@ -448,8 +459,6 @@ module.exports = function dimensionBreakdownQuery({
       : buildFilterWhere(filters);
 
   const notNullSql = buildNotNullFilter(dimension);
-  const normalizedWindow = normalizeWindowForQuery(window);
-  const normalizedBaselineWindow = normalizeWindowForQuery(baselineWindow);
   const windowStart = normalizedWindow.start;
   const windowEnd = normalizedWindow.end;
   const baselineStart = normalizedBaselineWindow.start;

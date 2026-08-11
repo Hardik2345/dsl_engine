@@ -2,6 +2,7 @@ const context = {
   meta: {
     tenantId: 'TMC',
     metric: 'cvr',
+    timezone: 'Asia/Kolkata',
     triggeredAt: '2026-01-16 23:59:59',
     window: {
       start: '2026-01-18 00:00:00',
