@@ -45,12 +45,35 @@ test('completed Asia/Kolkata days use exact Shopify product orders', () => {
   assert.match(spec.sql, /FROM shopify_orders/);
   assert.doesNotMatch(spec.sql, /FROM hourly_product_performance_rollup/);
   assert.match(spec.sql, /COUNT\(DISTINCT order_name\)/);
+  assert.match(spec.sql, /created_date >= DATE\(\?\)/);
+  assert.doesNotMatch(spec.sql, /WHERE created_at >= \?/);
   assert.deepEqual(spec.params.slice(0, 4), [
     '2026-08-01 00:00:00',
     '2026-08-02 00:00:00',
     '2026-07-31 00:00:00',
     '2026-08-01 00:00:00',
   ]);
+});
+
+test('partial-day landing-page attribution falls back to line-item date and time', () => {
+  const spec = dimensionBreakdownQuery({
+    tenantId: 'TMC',
+    dimension: 'landing_page_path',
+    timezone: 'Asia/Kolkata',
+    window: {
+      start: '2026-08-01T18:30:00.000Z',
+      end: '2026-08-02T06:30:00.000Z',
+    },
+    baselineWindow: {
+      start: '2026-07-31T18:30:00.000Z',
+      end: '2026-08-01T06:30:00.000Z',
+    },
+    filters: [],
+    includeOrders: true,
+  });
+
+  assert.match(spec.sql, /COALESCE\(\s*created_at,\s*STR_TO_DATE\(CONCAT\(created_date, ' ', created_time\)/);
+  assert.equal((spec.sql.match(/\?/g) || []).length, spec.params.length);
 });
 
 test('overall metrics use the same timezone-normalized boundaries', () => {

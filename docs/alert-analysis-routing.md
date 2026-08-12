@@ -189,6 +189,12 @@ This is the original, general-purpose breakdown path. It works for daily analysi
 
 This path behaves like the canonical daily breakdown logic in the engine. When the windows are full-day aligned, this is the path that should be treated as the default reference behavior.
 
+Daily order filtering uses `shopify_orders.created_date`. Shopify ingestion can
+store additional product line-item rows with a null `created_at` while retaining
+`created_date` and `created_time`; filtering daily product orders on `created_at`
+would silently omit those products. Partial-day order attribution uses
+`created_at` with `created_date + created_time` as the fallback timestamp.
+
 ## What the Node Expects
 
 Regardless of routing path, the breakdown query must return the same output contract so that [`RecursiveDimensionBreakdownNode.js`](/Users/hardik/Projects/dsl_engine/nodes/RecursiveDimensionBreakdownNode.js) can continue operating without path-specific logic.

@@ -253,8 +253,16 @@ current_product_orders AS (
     product_id,
     COALESCE(COUNT(DISTINCT order_name), 0) AS orders
   FROM shopify_orders
-  WHERE created_at >= ?
-    AND created_at <  ?
+  WHERE created_date >= DATE(?)
+    AND created_date <= DATE(?)
+    AND COALESCE(
+      created_at,
+      STR_TO_DATE(CONCAT(created_date, ' ', created_time), '%Y-%m-%d %H:%i:%s')
+    ) >= ?
+    AND COALESCE(
+      created_at,
+      STR_TO_DATE(CONCAT(created_date, ' ', created_time), '%Y-%m-%d %H:%i:%s')
+    ) <  ?
     ${filterSql}
     AND product_id IS NOT NULL
   GROUP BY product_id
@@ -264,8 +272,16 @@ baseline_product_orders AS (
     product_id,
     COALESCE(COUNT(DISTINCT order_name), 0) AS orders
   FROM shopify_orders
-  WHERE created_at >= ?
-    AND created_at <  ?
+  WHERE created_date >= DATE(?)
+    AND created_date <= DATE(?)
+    AND COALESCE(
+      created_at,
+      STR_TO_DATE(CONCAT(created_date, ' ', created_time), '%Y-%m-%d %H:%i:%s')
+    ) >= ?
+    AND COALESCE(
+      created_at,
+      STR_TO_DATE(CONCAT(created_date, ' ', created_time), '%Y-%m-%d %H:%i:%s')
+    ) <  ?
     ${filterSql}
     AND product_id IS NOT NULL
   GROUP BY product_id
@@ -373,8 +389,8 @@ current_orders AS (
     ${dimension} AS dimension_value,
     COALESCE(COUNT(DISTINCT order_name), 0) AS orders
   FROM shopify_orders
-  WHERE created_at >= ?
-    AND created_at <  ?
+  WHERE created_date >= DATE(?)
+    AND created_date <  DATE(?)
     ${filterSql}
   GROUP BY ${dimension}
 ),
@@ -383,8 +399,8 @@ baseline_orders AS (
     ${dimension} AS dimension_value,
     COALESCE(COUNT(DISTINCT order_name), 0) AS orders
   FROM shopify_orders
-  WHERE created_at >= ?
-    AND created_at <  ?
+  WHERE created_date >= DATE(?)
+    AND created_date <  DATE(?)
     ${filterSql}
   GROUP BY ${dimension}
 ),` : ''}
@@ -499,8 +515,10 @@ module.exports = function dimensionBreakdownQuery({
 
     ...(includeOrders ? [
       windowStart, windowEnd,
+      windowStart, windowEnd,
       ...filterParams,
 
+      baselineStart, baselineEnd,
       baselineStart, baselineEnd,
       ...filterParams
     ] : [])
