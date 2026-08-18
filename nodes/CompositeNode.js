@@ -5,6 +5,7 @@ const recursiveDimensionBreakdownNode = require('./RecursiveDimensionBreakdownNo
 const branchNode = require('./BranchNode');
 const insightNode = require('./InsightNode');
 const workflowRefNode = require('./WorkflowRefNode');
+const emailNode = require('./EmailNode');
 
 const NodeRegistry = {
   validation: validationNode,
@@ -12,7 +13,8 @@ const NodeRegistry = {
   recursive_dimension_breakdown: recursiveDimensionBreakdownNode,
   branch: branchNode,
   workflow_ref: workflowRefNode,
-  insight: insightNode
+  insight: insightNode,
+  email: emailNode
 };
 
 async function CompositeNode(def, context, nodeMapOrOptions) {
@@ -52,7 +54,7 @@ async function CompositeNode(def, context, nodeMapOrOptions) {
       };
     }
 
-    const result = stepDef.type === 'workflow_ref'
+    const result = stepDef.type === 'workflow_ref' || stepDef.type === 'email'
       ? await executor(stepDef, context, runtime)
       : await executor(stepDef, context);
 

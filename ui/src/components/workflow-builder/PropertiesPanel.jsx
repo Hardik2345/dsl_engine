@@ -45,6 +45,45 @@ const BREAKDOWN_INPUT_SCOPE_OPTIONS = [
   { value: 'breakdown', label: 'From Breakdown' }
 ];
 
+const EMAIL_VALUE_FORMATS = ['text', 'integer', 'decimal', 'percent_ratio', 'percent', 'delta_percent'];
+const EMAIL_TABLE_TONES = ['positive', 'negative', 'neutral'];
+const EMAIL_METRIC_ICONS = ['metric', 'sessions', 'orders', 'conversion', 'trend'];
+
+const createDefaultReportTemplate = () => ({
+  preset: 'performance_report_v1',
+  eyebrow: 'Performance Report',
+  title: 'Daily Performance',
+  description: 'Performance compared with the previous period.',
+  period: { current: 'meta.window', comparison: 'meta.baselineWindow' },
+  metrics: [
+    { label: 'Sessions', value: 'metrics.current_sessions', change: 'metrics.sessions_delta_pct', format: 'integer', icon: 'sessions' },
+    { label: 'Orders', value: 'metrics.current_orders', change: 'metrics.orders_delta_pct', format: 'integer', icon: 'orders' },
+    { label: 'Conversion Rate', value: 'metrics.current_cvr', change: 'metrics.cvr_delta_pct', format: 'percent_ratio', icon: 'conversion' }
+  ],
+  tables: [
+    {
+      title: 'Top Performers', source: 'breakdowns.top_utm_sources', tone: 'positive', limit: 3,
+      columns: [
+        { label: 'Source', path: 'display_value', format: 'text' },
+        { label: 'Sessions', path: 'current.sessions', format: 'integer' },
+        { label: 'Orders', path: 'current.orders', format: 'integer' },
+        { label: 'CVR', path: 'current.cvr', format: 'percent_ratio' },
+        { label: 'Change', path: 'deltas.cvr_delta_pct', format: 'delta_percent' }
+      ]
+    },
+    {
+      title: 'Bottom Performers', source: 'breakdowns.bottom_utm_sources', tone: 'negative', limit: 3,
+      columns: [
+        { label: 'Source', path: 'display_value', format: 'text' },
+        { label: 'Sessions', path: 'current.sessions', format: 'integer' },
+        { label: 'Orders', path: 'current.orders', format: 'integer' },
+        { label: 'CVR', path: 'current.cvr', format: 'percent_ratio' },
+        { label: 'Change', path: 'deltas.cvr_delta_pct', format: 'delta_percent' }
+      ]
+    }
+  ]
+});
+
 
 const DIMENSION_OPTIONS = [
   'product_id',
@@ -392,7 +431,9 @@ export default function PropertiesPanel({
   useEffect(() => {
     setData(selectedNode?.data || {});
     setRuleWorkflowSelections({});
-    setEmailRecipientsInput(formatEmailRecipients(selectedNode?.data?.email?.to));
+    setEmailRecipientsInput(formatEmailRecipients(
+      selectedNode?.data?.type === 'email' ? selectedNode?.data?.to : selectedNode?.data?.email?.to
+    ));
   }, [selectedNode?.id]);
 
   const bumpTopTokenVersion = (value) => {
@@ -456,6 +497,139 @@ export default function PropertiesPanel({
 
   const renderContent = () => {
     switch (selectedNode.type) {
+      case 'email': {
+        const reportTemplate = data.template && typeof data.template === 'object'
+          ? data.template
+          : createDefaultReportTemplate();
+        const updateReportTemplate = (field, value) => handleChange('template', { ...reportTemplate, [field]: value });
+        const updateMetric = (index, field, value) => {
+          const metrics = [...(reportTemplate.metrics || [])];
+          metrics[index] = { ...metrics[index], [field]: value };
+          updateReportTemplate('metrics', metrics);
+        };
+        const updateTable = (index, field, value) => {
+          const tables = [...(reportTemplate.tables || [])];
+          tables[index] = { ...tables[index], [field]: value };
+          updateReportTemplate('tables', tables);
+        };
+        const updateColumn = (tableIndex, columnIndex, field, value) => {
+          const tables = [...(reportTemplate.tables || [])];
+          const columns = [...(tables[tableIndex]?.columns || [])];
+          columns[columnIndex] = { ...columns[columnIndex], [field]: value };
+          tables[tableIndex] = { ...tables[tableIndex], columns };
+          updateReportTemplate('tables', tables);
+        };
+        return (
+          <div className="space-y-4">
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Email Format</label>
+              <select
+                value={data.format || 'insight'}
+                onChange={(e) => {
+                  const format = e.target.value;
+                  const newData = {
+                    ...data,
+                    format,
+                    template: format === 'report' ? createDefaultReportTemplate() : { insightSource: 'scratch.finalInsight' }
+                  };
+                  setData(newData);
+                  onChange(selectedNode.id, newData);
+                }}
+                className="w-full border p-2 rounded text-sm bg-white"
+              >
+                <option value="insight">Insight</option>
+                <option value="report">Report</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Recipients</label>
+              <input
+                value={emailRecipientsInput}
+                onChange={(e) => {
+                  setEmailRecipientsInput(e.target.value);
+                  handleChange('to', parseEmailRecipients(e.target.value));
+                }}
+                placeholder="ops@example.com, owner@example.com"
+                className="w-full border p-2 rounded text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Subject</label>
+              <input
+                value={data.subject || ''}
+                onChange={(e) => handleChange('subject', e.target.value)}
+                placeholder="{{meta.brandName}}: Daily report"
+                className="w-full border p-2 rounded text-sm"
+              />
+              <div className="text-[10px] text-gray-400 mt-1">Supports safe context bindings such as {'{{meta.brandName}}'}.</div>
+            </div>
+
+            {data.format === 'report' ? (
+              <>
+                <div className="space-y-2 pt-3 border-t">
+                  <div className="text-xs font-semibold text-gray-700">Report Copy & Period</div>
+                  {['eyebrow', 'title', 'description'].map((field) => (
+                    <input key={field} value={reportTemplate[field] || ''} onChange={(e) => updateReportTemplate(field, e.target.value)} placeholder={field} className="w-full border p-2 rounded text-sm" />
+                  ))}
+                  <input value={reportTemplate.period?.current || ''} onChange={(e) => updateReportTemplate('period', { ...(reportTemplate.period || {}), current: e.target.value })} placeholder="Current period path" className="w-full border p-2 rounded text-sm font-mono" />
+                  <input value={reportTemplate.period?.comparison || ''} onChange={(e) => updateReportTemplate('period', { ...(reportTemplate.period || {}), comparison: e.target.value })} placeholder="Comparison period path" className="w-full border p-2 rounded text-sm font-mono" />
+                </div>
+
+                <div className="space-y-3 pt-3 border-t">
+                  <div className="flex justify-between items-center"><span className="text-xs font-semibold text-gray-700">Metric Cards</span><button type="button" disabled={(reportTemplate.metrics || []).length >= 4} onClick={() => updateReportTemplate('metrics', [...(reportTemplate.metrics || []), { label: 'Metric', value: 'metrics.current_sessions', change: 'metrics.sessions_delta_pct', format: 'integer', icon: 'metric' }])} className="text-xs text-blue-600 disabled:text-gray-300"><Plus className="inline w-3 h-3" /> Add</button></div>
+                  {(reportTemplate.metrics || []).map((metric, index) => (
+                    <div key={index} className="border rounded p-2 space-y-2 bg-gray-50">
+                      <div className="flex gap-2"><input value={metric.label || ''} onChange={(e) => updateMetric(index, 'label', e.target.value)} placeholder="Label" className="min-w-0 flex-1 border p-1 rounded text-xs" /><button type="button" disabled={(reportTemplate.metrics || []).length <= 1} onClick={() => updateReportTemplate('metrics', reportTemplate.metrics.filter((_, idx) => idx !== index))} className="text-red-500 disabled:text-gray-300"><Trash2 className="w-4 h-4" /></button></div>
+                      <input value={metric.value || ''} onChange={(e) => updateMetric(index, 'value', e.target.value)} placeholder="Value context path" className="w-full border p-1 rounded text-xs font-mono" />
+                      <input value={metric.change || ''} onChange={(e) => updateMetric(index, 'change', e.target.value || undefined)} placeholder="Change context path (optional)" className="w-full border p-1 rounded text-xs font-mono" />
+                      <div className="flex gap-2"><select value={metric.format || 'text'} onChange={(e) => updateMetric(index, 'format', e.target.value)} className="min-w-0 flex-1 border p-1 rounded text-xs bg-white">{EMAIL_VALUE_FORMATS.map((format) => <option key={format}>{format}</option>)}</select><select value={metric.icon || 'metric'} onChange={(e) => updateMetric(index, 'icon', e.target.value)} className="min-w-0 flex-1 border p-1 rounded text-xs bg-white">{EMAIL_METRIC_ICONS.map((icon) => <option key={icon}>{icon}</option>)}</select></div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="space-y-3 pt-3 border-t">
+                  <div className="flex justify-between items-center"><span className="text-xs font-semibold text-gray-700">Report Tables</span><button type="button" disabled={(reportTemplate.tables || []).length >= 4} onClick={() => updateReportTemplate('tables', [...(reportTemplate.tables || []), { title: 'Table', source: 'breakdowns.output_key', tone: 'neutral', limit: 3, columns: [{ label: 'Name', path: 'display_value', format: 'text' }] }])} className="text-xs text-blue-600 disabled:text-gray-300"><Plus className="inline w-3 h-3" /> Add</button></div>
+                  {(reportTemplate.tables || []).map((table, tableIndex) => (
+                    <div key={tableIndex} className="border rounded p-2 space-y-2 bg-gray-50">
+                      <div className="flex gap-2"><input value={table.title || ''} onChange={(e) => updateTable(tableIndex, 'title', e.target.value)} placeholder="Table title" className="min-w-0 flex-1 border p-1 rounded text-xs" /><button type="button" disabled={(reportTemplate.tables || []).length <= 1} onClick={() => updateReportTemplate('tables', reportTemplate.tables.filter((_, idx) => idx !== tableIndex))} className="text-red-500 disabled:text-gray-300"><Trash2 className="w-4 h-4" /></button></div>
+                      <input value={table.source || ''} onChange={(e) => updateTable(tableIndex, 'source', e.target.value)} placeholder="Array context path" className="w-full border p-1 rounded text-xs font-mono" />
+                      <div className="flex gap-2"><select value={table.tone || 'neutral'} onChange={(e) => updateTable(tableIndex, 'tone', e.target.value)} className="min-w-0 flex-1 border p-1 rounded text-xs bg-white">{EMAIL_TABLE_TONES.map((tone) => <option key={tone}>{tone}</option>)}</select><input type="number" min="1" max="100" value={table.limit || 1} onChange={(e) => updateTable(tableIndex, 'limit', Number(e.target.value))} className="w-16 border p-1 rounded text-xs" /></div>
+                      <div className="text-[10px] font-semibold text-gray-500">Columns</div>
+                      {(table.columns || []).map((column, columnIndex) => (
+                        <div key={columnIndex} className="grid grid-cols-[1fr_1fr_auto] gap-1">
+                          <input value={column.label || ''} onChange={(e) => updateColumn(tableIndex, columnIndex, 'label', e.target.value)} placeholder="Label" className="min-w-0 border p-1 rounded text-[10px]" />
+                          <input value={column.path || ''} onChange={(e) => updateColumn(tableIndex, columnIndex, 'path', e.target.value)} placeholder="Row path" className="min-w-0 border p-1 rounded text-[10px] font-mono" />
+                          <button type="button" disabled={(table.columns || []).length <= 1} onClick={() => updateTable(tableIndex, 'columns', table.columns.filter((_, idx) => idx !== columnIndex))} className="text-red-500 disabled:text-gray-300"><Trash2 className="w-3 h-3" /></button>
+                          <select value={column.format || 'text'} onChange={(e) => updateColumn(tableIndex, columnIndex, 'format', e.target.value)} className="col-span-2 border p-1 rounded text-[10px] bg-white">{EMAIL_VALUE_FORMATS.map((format) => <option key={format}>{format}</option>)}</select>
+                        </div>
+                      ))}
+                      <button type="button" onClick={() => updateTable(tableIndex, 'columns', [...(table.columns || []), { label: 'Value', path: 'value', format: 'text' }])} className="text-[10px] text-blue-600"><Plus className="inline w-3 h-3" /> Add column</button>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div className="pt-3 border-t">
+                <label className="block text-xs font-medium text-gray-500 mb-1">Insight Source</label>
+                <input value={data.template?.insightSource || 'scratch.finalInsight'} onChange={(e) => handleChange('template', { insightSource: e.target.value })} className="w-full border p-2 rounded text-sm font-mono" />
+              </div>
+            )}
+
+            <div className="space-y-2 pt-3 border-t">
+              <div className="text-xs font-semibold text-gray-700">Branding Overrides</div>
+              {['displayName', 'logoUrl', 'tagline', 'primaryColor', 'footerText'].map((field) => (
+                <input key={field} value={data.branding?.[field] || ''} onChange={(e) => handleChange('branding', { ...(data.branding || {}), [field]: e.target.value || undefined })} placeholder={field} className="w-full border p-2 rounded text-sm" />
+              ))}
+            </div>
+            <div className="space-y-2 pt-3 border-t">
+              <label className="block text-xs font-medium text-gray-500">Failure Policy</label>
+              <select value="terminate" disabled className="w-full border p-2 rounded text-sm bg-gray-100"><option value="terminate">Terminate workflow</option></select>
+              <input value={data.on_fail?.reason || ''} onChange={(e) => handleChange('on_fail', { action: 'terminate', reason: e.target.value })} placeholder="Email could not be sent" className="w-full border p-2 rounded text-sm" />
+            </div>
+          </div>
+        );
+      }
       case 'branch':
         return (
           <div className="space-y-4">

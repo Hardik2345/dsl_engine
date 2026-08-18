@@ -509,6 +509,77 @@ Authoring advice:
 - Keep summary templates resilient to missing tokens
 - Use details only for tokens you know are available from prior nodes
 
+### 5.8 `email`
+
+Use a dedicated email node when delivery should be independent from insight generation. Existing `insight.email` configurations remain supported.
+
+Insight example:
+
+```json
+{
+  "id": "send_insight",
+  "type": "email",
+  "format": "insight",
+  "to": ["team@example.com"],
+  "subject": "{{meta.brandName}}: Workflow insight",
+  "template": { "insightSource": "scratch.finalInsight" },
+  "on_fail": { "action": "terminate", "reason": "Insight email failed" }
+}
+```
+
+Report example:
+
+```json
+{
+  "id": "send_report",
+  "type": "email",
+  "format": "report",
+  "to": ["team@example.com"],
+  "subject": "{{meta.brandName}}: Daily report",
+  "template": {
+    "preset": "performance_report_v1",
+    "eyebrow": "UTM Source Report",
+    "title": "Top & Bottom UTM Sources",
+    "description": "Traffic and conversion performance by source.",
+    "period": {
+      "current": "meta.window",
+      "comparison": "meta.baselineWindow"
+    },
+    "metrics": [
+      {
+        "label": "Sessions",
+        "value": "metrics.current_sessions",
+        "change": "metrics.sessions_delta_pct",
+        "format": "integer",
+        "icon": "sessions"
+      }
+    ],
+    "tables": [
+      {
+        "title": "Top Sources",
+        "source": "breakdowns.top_utm_sources",
+        "tone": "positive",
+        "limit": 3,
+        "columns": [
+          { "label": "Source", "path": "display_value", "format": "text" },
+          { "label": "CVR", "path": "current.cvr", "format": "percent_ratio" }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Binding and runtime behavior:
+
+- Context bindings are safe dot-separated paths; arbitrary expressions and HTML are not evaluated
+- Report table sources must already exist as arrays in the run context
+- Missing bindings fail the node; existing empty arrays render a `No data available` row
+- Supported value formats are `text`, `integer`, `decimal`, `percent_ratio`, `percent`, and `delta_percent`
+- Successful deliveries are recorded at `context.scratch.emailDeliveries.<node_id>`
+- Dedicated email subjects render exactly as configured; legacy insight emails keep their tenant prefix
+- Branding precedence is node override, then tenant `settings.emailBranding`, then platform defaults
+
 ## 6. `on_fail` Semantics
 
 Nodes can define:

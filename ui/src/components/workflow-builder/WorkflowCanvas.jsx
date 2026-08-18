@@ -8,6 +8,7 @@ import { AnalysisNode } from './nodes/AnalysisNode';
 import { InsightNode } from './nodes/InsightNode';
 import { CompositeNode } from './nodes/CompositeNode';
 import { WorkflowRefNode } from './nodes/WorkflowRefNode';
+import { EmailNode } from './nodes/EmailNode';
 import DeletableEdge from './edges/DeletableEdge';
 
 const nodeTypes = {
@@ -17,6 +18,7 @@ const nodeTypes = {
   insight: InsightNode,
   composite: CompositeNode,
   workflow_ref: WorkflowRefNode,
+  email: EmailNode,
 };
 
 const edgeTypes = {
@@ -72,7 +74,15 @@ export default function WorkflowCanvas({
             ...(type === 'metric_compare' ? { type: 'metric_compare', metrics: [] } : {}),
             ...(type === 'metric_breakdown' ? { type: 'recursive_dimension_breakdown', dimensions: [], base_metric: 'orders' } : {}),
             ...(type === 'composite' ? { type: 'composite', steps: [] } : {}),
-            ...(type === 'insight' ? { type: 'insight', template: '' } : {})
+            ...(type === 'insight' ? { type: 'insight', template: '' } : {}),
+            ...(type === 'email' ? {
+              type: 'email',
+              format: 'insight',
+              to: [],
+              subject: '{{meta.brandName}}: Insight',
+              template: { insightSource: 'scratch.finalInsight' },
+              on_fail: { action: 'terminate', reason: 'Email could not be sent' }
+            } : {})
         },
       };
 

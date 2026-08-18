@@ -8,7 +8,14 @@ const TenantSchema = new mongoose.Schema(
     isActive: { type: Boolean, default: true },
     settings: {
       currency: { type: String, default: 'USD' },
-      timezone: { type: String, default: 'UTC' }
+      timezone: { type: String, default: 'UTC' },
+      emailBranding: {
+        displayName: { type: String },
+        logoUrl: { type: String },
+        tagline: { type: String },
+        primaryColor: { type: String },
+        footerText: { type: String }
+      }
     }
   },
   { timestamps: true }

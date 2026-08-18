@@ -23,6 +23,7 @@ export default function SettingsPage() {
   const updateTenant = useUpdateTenant();
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [timezoneDrafts, setTimezoneDrafts] = useState({});
+  const [brandingDrafts, setBrandingDrafts] = useState({});
 
   const handleDeleteTenant = async (tid) => {
     if (!confirm(`Are you sure you want to deactivate tenant '${tid}'?`)) return;
@@ -58,6 +59,33 @@ export default function SettingsPage() {
       toast.success(`Timezone updated for '${tenant.tenantId}'`);
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed to update tenant timezone');
+    }
+  };
+
+  const getBrandingDraft = (tenant) => brandingDrafts[tenant.tenantId] || tenant.settings?.emailBranding || {};
+  const updateBrandingDraft = (tenant, field, value) => {
+    setBrandingDrafts((prev) => ({
+      ...prev,
+      [tenant.tenantId]: { ...getBrandingDraft(tenant), [field]: value }
+    }));
+  };
+  const handleSaveBranding = async (tenant) => {
+    try {
+      const emailBranding = Object.fromEntries(
+        Object.entries(getBrandingDraft(tenant)).filter(([, value]) => String(value || '').trim() !== '')
+      );
+      await updateTenant.mutateAsync({
+        tenantId: tenant.tenantId,
+        updates: {
+          settings: {
+            ...(tenant.settings || {}),
+            emailBranding
+          }
+        }
+      });
+      toast.success(`Email branding updated for '${tenant.tenantId}'`);
+    } catch (err) {
+      toast.error(err.response?.data?.errors?.join(', ') || err.response?.data?.error || 'Failed to update email branding');
     }
   };
 
@@ -139,6 +167,19 @@ export default function SettingsPage() {
                         >
                           <Save className="w-4 h-4 mr-1" />
                           Save Timezone
+                        </Button>
+                      </div>
+                      <div className="mt-4 border-t border-gray-200 pt-3">
+                        <div className="text-xs font-semibold text-gray-700 mb-2">Email Branding</div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <input className="border rounded px-2 py-1.5 text-xs" placeholder="Display name" value={getBrandingDraft(tenant).displayName || ''} onChange={(e) => updateBrandingDraft(tenant, 'displayName', e.target.value)} />
+                          <input className="border rounded px-2 py-1.5 text-xs" placeholder="Primary color (#66c61c)" value={getBrandingDraft(tenant).primaryColor || ''} onChange={(e) => updateBrandingDraft(tenant, 'primaryColor', e.target.value)} />
+                          <input className="col-span-2 border rounded px-2 py-1.5 text-xs" placeholder="HTTPS logo URL" value={getBrandingDraft(tenant).logoUrl || ''} onChange={(e) => updateBrandingDraft(tenant, 'logoUrl', e.target.value)} />
+                          <input className="col-span-2 border rounded px-2 py-1.5 text-xs" placeholder="Tagline" value={getBrandingDraft(tenant).tagline || ''} onChange={(e) => updateBrandingDraft(tenant, 'tagline', e.target.value)} />
+                          <input className="col-span-2 border rounded px-2 py-1.5 text-xs" placeholder="Footer text" value={getBrandingDraft(tenant).footerText || ''} onChange={(e) => updateBrandingDraft(tenant, 'footerText', e.target.value)} />
+                        </div>
+                        <Button size="sm" variant="secondary" className="mt-2" onClick={() => handleSaveBranding(tenant)} loading={updateTenant.isPending}>
+                          <Save className="w-4 h-4 mr-1" /> Save Branding
                         </Button>
                       </div>
                     </div>

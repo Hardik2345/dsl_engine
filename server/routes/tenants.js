@@ -3,6 +3,7 @@ const Tenant = require('../models/Tenant');
 const WorkflowSchedule = require('../models/WorkflowSchedule');
 const WorkflowRun = require('../models/WorkflowRun');
 const { getNextRunAt } = require('../../scheduler/app/cronUtils');
+const { validateEmailBranding } = require('../lib/emailBranding');
 
 function isSupportedTimeZone(timeZone) {
   try {
@@ -82,6 +83,8 @@ router.post('/', async (req, res, next) => {
     if (resolvedSettings.timezone && !isSupportedTimeZone(resolvedSettings.timezone)) {
       return res.status(400).json({ error: 'timezone must be a supported IANA timezone' });
     }
+    const brandingErrors = validateEmailBranding(resolvedSettings.emailBranding, 'settings.emailBranding');
+    if (brandingErrors.length) return res.status(400).json({ errors: brandingErrors });
 
     const tenant = await Tenant.create({
       tenantId: tenantId.toUpperCase(),
@@ -114,7 +117,21 @@ router.patch('/:tenantId', async (req, res, next) => {
       if (settings.timezone && !isSupportedTimeZone(settings.timezone)) {
         return res.status(400).json({ error: 'timezone must be a supported IANA timezone' });
       }
-      tenant.settings = { ...tenant.settings, ...settings };
+      const brandingErrors = validateEmailBranding(settings.emailBranding, 'settings.emailBranding');
+      if (brandingErrors.length) return res.status(400).json({ errors: brandingErrors });
+      const currentSettings = tenant.settings?.toObject
+        ? tenant.settings.toObject()
+        : (tenant.settings || {});
+      tenant.settings = {
+        ...currentSettings,
+        ...settings,
+        ...(settings.emailBranding !== undefined ? {
+          emailBranding: {
+            ...(currentSettings.emailBranding || {}),
+            ...(settings.emailBranding || {})
+          }
+        } : {})
+      };
     }
 
     await tenant.save();

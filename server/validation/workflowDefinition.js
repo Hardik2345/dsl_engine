@@ -5,7 +5,8 @@ const ALLOWED_NODE_TYPES = new Set([
   'recursive_dimension_breakdown',
   'composite',
   'workflow_ref',
-  'insight'
+  'insight',
+  'email'
 ]);
 
 const ALLOWED_DIMENSIONS = new Set([
@@ -26,6 +27,132 @@ const {
   getPartialDayLandingPagePathCompatibilityErrors
 } = require('./productPartialDayCompatibility');
 const { validateRecipients } = require('../services/emailService');
+const { isSafeBindingPath } = require('../lib/emailBindings');
+const { validateEmailBranding } = require('../lib/emailBranding');
+
+const EMAIL_FORMATS = new Set(['insight', 'report']);
+const REPORT_PRESETS = new Set(['performance_report_v1']);
+const REPORT_VALUE_FORMATS = new Set(['text', 'integer', 'decimal', 'percent_ratio', 'percent', 'delta_percent']);
+const REPORT_TONES = new Set(['positive', 'negative', 'neutral']);
+const REPORT_ICONS = new Set(['metric', 'sessions', 'orders', 'conversion', 'trend']);
+
+function validateBindingPath(value, label, errors) {
+  if (!isSafeBindingPath(value)) errors.push(`${label} must be a safe dot-separated context path`);
+}
+
+function validateBindingTemplate(value, label, errors) {
+  if (typeof value !== 'string') return;
+  let remainder = value;
+  const tokens = value.matchAll(/\{\{([^{}]+)\}\}/g);
+  for (const token of tokens) {
+    if (!isSafeBindingPath(token[1].trim())) {
+      errors.push(`${label} contains an unsafe binding`);
+    }
+    remainder = remainder.replace(token[0], '');
+  }
+  if (/[{}]/.test(remainder)) {
+    errors.push(`${label} contains malformed binding syntax`);
+  }
+}
+
+function rejectUnknownFields(value, allowedFields, label, errors) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return;
+  Object.keys(value).filter((key) => !allowedFields.has(key)).forEach((key) => {
+    errors.push(`${label} contains unsupported field ${key}`);
+  });
+}
+
+function validateEmailNode(node, errors) {
+  const prefix = `email node ${node.id}`;
+  if (!EMAIL_FORMATS.has(node.format)) errors.push(`${prefix} format must be insight or report`);
+  if (typeof node.subject !== 'string' || node.subject.trim() === '') errors.push(`${prefix} subject is required`);
+  validateBindingTemplate(node.subject, `${prefix} subject`, errors);
+  const recipients = validateRecipients(node.to);
+  if (!recipients.ok) errors.push(`${prefix} recipients invalid: ${recipients.error}`);
+  errors.push(...validateEmailBranding(node.branding, `${prefix} branding`));
+
+  if (!node.template || typeof node.template !== 'object' || Array.isArray(node.template)) {
+    errors.push(`${prefix} template must be an object`);
+    return;
+  }
+  if (node.format === 'insight') {
+    validateBindingPath(node.template.insightSource || 'scratch.finalInsight', `${prefix} template.insightSource`, errors);
+    const unsupported = Object.keys(node.template).filter((key) => key !== 'insightSource');
+    unsupported.forEach((key) => errors.push(`${prefix} insight template contains unsupported field ${key}`));
+    return;
+  }
+  if (node.format !== 'report') return;
+
+  if (!REPORT_PRESETS.has(node.template.preset)) errors.push(`${prefix} has unsupported report preset`);
+  ['eyebrow', 'title'].forEach((field) => {
+    if (typeof node.template[field] !== 'string' || node.template[field].trim() === '') {
+      errors.push(`${prefix} template.${field} is required`);
+    }
+  });
+  if (node.template.description !== undefined && typeof node.template.description !== 'string') {
+    errors.push(`${prefix} template.description must be a string`);
+  }
+  if (!node.template.period || typeof node.template.period !== 'object' || Array.isArray(node.template.period)) {
+    errors.push(`${prefix} template.period must be an object`);
+  }
+  rejectUnknownFields(node.template.period, new Set(['current', 'comparison']), `${prefix} template.period`, errors);
+  validateBindingPath(node.template.period?.current, `${prefix} template.period.current`, errors);
+  validateBindingPath(node.template.period?.comparison, `${prefix} template.period.comparison`, errors);
+
+  if (!Array.isArray(node.template.metrics) || node.template.metrics.length < 1 || node.template.metrics.length > 4) {
+    errors.push(`${prefix} template.metrics must contain one to four items`);
+  } else {
+    node.template.metrics.forEach((metric, index) => {
+      const label = `${prefix} metric ${index + 1}`;
+      if (!metric || typeof metric !== 'object' || Array.isArray(metric)) {
+        errors.push(`${label} must be an object`);
+        return;
+      }
+      if (typeof metric.label !== 'string' || metric.label.trim() === '') errors.push(`${label} label is required`);
+      validateBindingPath(metric.value, `${label} value`, errors);
+      if (metric.change !== undefined) validateBindingPath(metric.change, `${label} change`, errors);
+      if (!REPORT_VALUE_FORMATS.has(metric.format)) errors.push(`${label} has unsupported format`);
+      if (metric.icon !== undefined && !REPORT_ICONS.has(metric.icon)) errors.push(`${label} has unsupported icon`);
+      rejectUnknownFields(metric, new Set(['label', 'value', 'change', 'format', 'icon']), label, errors);
+    });
+  }
+
+  if (!Array.isArray(node.template.tables) || node.template.tables.length < 1 || node.template.tables.length > 4) {
+    errors.push(`${prefix} template.tables must contain one to four tables`);
+  } else {
+    node.template.tables.forEach((table, tableIndex) => {
+      const label = `${prefix} table ${tableIndex + 1}`;
+      if (!table || typeof table !== 'object' || Array.isArray(table)) {
+        errors.push(`${label} must be an object`);
+        return;
+      }
+      if (typeof table.title !== 'string' || table.title.trim() === '') errors.push(`${label} title is required`);
+      validateBindingPath(table.source, `${label} source`, errors);
+      if (!REPORT_TONES.has(table.tone || 'neutral')) errors.push(`${label} has unsupported tone`);
+      if (!Number.isInteger(table.limit) || table.limit < 1 || table.limit > 100) errors.push(`${label} limit must be an integer from 1 to 100`);
+      if (!Array.isArray(table.columns) || table.columns.length < 1) {
+        errors.push(`${label} must contain at least one column`);
+      } else {
+        table.columns.forEach((column, columnIndex) => {
+          const columnLabel = `${label} column ${columnIndex + 1}`;
+          if (!column || typeof column !== 'object' || Array.isArray(column)) {
+            errors.push(`${columnLabel} must be an object`);
+            return;
+          }
+          if (typeof column.label !== 'string' || column.label.trim() === '') errors.push(`${columnLabel} label is required`);
+          validateBindingPath(column.path, `${columnLabel} path`, errors);
+          if (!REPORT_VALUE_FORMATS.has(column.format)) errors.push(`${columnLabel} has unsupported format`);
+          rejectUnknownFields(column, new Set(['label', 'path', 'format']), columnLabel, errors);
+        });
+      }
+      rejectUnknownFields(table, new Set(['title', 'source', 'tone', 'limit', 'columns']), label, errors);
+    });
+  }
+  const allowed = new Set(['preset', 'eyebrow', 'title', 'description', 'period', 'metrics', 'tables']);
+  Object.keys(node.template).filter((key) => !allowed.has(key)).forEach((key) => {
+    errors.push(`${prefix} report template contains unsupported field ${key}`);
+  });
+}
 
 function validateInsightDetailItem(detail, nodeId, errors, index) {
   if (typeof detail === 'string') {
@@ -331,6 +458,10 @@ function validateWorkflowDefinition(definition) {
           }
         }
       }
+    }
+
+    if (node.type === 'email') {
+      validateEmailNode(node, errors);
     }
   }
 

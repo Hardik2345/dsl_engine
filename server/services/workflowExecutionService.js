@@ -3,6 +3,7 @@ const Insight = require('../models/Insight');
 const { pruneWorkflowRuns } = require('../lib/retention');
 const WorkflowRunner = require('../../engine/WorkflowRunner');
 const workflowResolverService = require('./workflowResolverService');
+const Tenant = require('../models/Tenant');
 
 async function resolveWorkflowVersion({ tenantId, workflowId, version }) {
   return workflowResolverService.resolveWorkflowVersion({
@@ -35,6 +36,15 @@ async function executeRun({ run, runId }) {
   }
 
   const nodeOutputs = [];
+  const tenant = await Tenant.findOne({ tenantId: targetRun.tenantId }).lean();
+  targetRun.context.meta = targetRun.context.meta || {};
+  if (!targetRun.context.meta.brandName && tenant?.name) {
+    targetRun.context.meta.brandName = tenant.name;
+  }
+  if (!targetRun.context.meta.emailBranding && tenant?.settings?.emailBranding) {
+    targetRun.context.meta.emailBranding = { ...tenant.settings.emailBranding };
+  }
+  targetRun.markModified('context');
   const runner = new WorkflowRunner(targetRun.definitionJson, {
     onNodeResult: payload => nodeOutputs.push(payload),
     workflowResolver: workflowResolverService,
@@ -80,6 +90,9 @@ async function executeRun({ run, runId }) {
     return targetRun;
   } catch (error) {
     targetRun.status = 'failed';
+    targetRun.executionTrace = targetRun.context?.executionTrace || [];
+    targetRun.nodeOutputs = nodeOutputs;
+    targetRun.markModified('context');
     targetRun.startedAt = startedAt;
     targetRun.finishedAt = new Date();
     targetRun.lastError = error.message;

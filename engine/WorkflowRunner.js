@@ -7,6 +7,7 @@ const compositeNode = require('../nodes/CompositeNode');
 const branchNode = require('../nodes/BranchNode');
 const insightNode = require('../nodes/InsightNode');
 const workflowRefNode = require('../nodes/WorkflowRefNode');
+const emailNode = require('../nodes/EmailNode');
 
 const NodeRegistry = {
   validation: validationNode,
@@ -15,7 +16,8 @@ const NodeRegistry = {
   composite: compositeNode,
   branch: branchNode,
   workflow_ref: workflowRefNode,
-  insight: insightNode
+  insight: insightNode,
+  email: emailNode
 };
 
 const DEFAULT_MAX_EXECUTION_STEPS = 100;
@@ -121,6 +123,8 @@ class WorkflowRunner {
         ? await executor(nodeDef, context, { nodeMap, runtime })
         : nodeDef.type === 'workflow_ref'
           ? await executor(nodeDef, context, runtime)
+          : nodeDef.type === 'email'
+            ? await executor(nodeDef, context, runtime)
           : await executor(nodeDef, context);
 
       if (this.options.onNodeResult) {
@@ -179,6 +183,7 @@ class WorkflowRunner {
     return {
       nodeMap,
       workflowIdentity,
+      emailSender: this.options.emailSender,
       executeWorkflowReference: async (nodeDef, context) =>
         this.executeWorkflowReference(nodeDef, context, { workflowIdentity, sharedState })
     };
