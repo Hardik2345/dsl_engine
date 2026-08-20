@@ -126,10 +126,9 @@ router.patch('/:tenantId', async (req, res, next) => {
         ...currentSettings,
         ...settings,
         ...(settings.emailBranding !== undefined ? {
-          emailBranding: {
-            ...(currentSettings.emailBranding || {}),
-            ...(settings.emailBranding || {})
-          }
+          // Treat this as a complete branding form. Merging prevents users
+          // from removing a previously configured logo, tagline, or color.
+          emailBranding: settings.emailBranding || {}
         } : {})
       };
     }
