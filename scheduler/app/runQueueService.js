@@ -8,6 +8,12 @@ function useRabbitRunQueue() {
   return process.env.SCHEDULER_RUN_QUEUE_BACKEND === 'rabbit';
 }
 
+// Lease duration is only a crash-detection window: healthy runs keep their lease
+// alive with startLeaseHeartbeat, so a slow workflow is never recovered mid-flight.
+// Recovering a live run re-executes it from node one, which re-sends its email.
+const RUN_LEASE_MS = Math.max(Number(process.env.SCHEDULER_RUN_LEASE_MS) || 120000, 1000);
+const LEASE_HEARTBEAT_MS = Math.max(Number(process.env.SCHEDULER_LEASE_HEARTBEAT_MS) || 15000, 1000);
+
 function getExecutionKey({ tenantId, workflowId }) {
   return `${tenantId}:${workflowId}`;
 }
@@ -90,7 +96,7 @@ async function enqueueRun(params) {
   };
 }
 
-async function claimNextRunnableRun(workerId, leaseMs = 30000) {
+async function claimNextRunnableRun(workerId, leaseMs = RUN_LEASE_MS) {
   const now = new Date();
   const leaseExpiresAt = new Date(now.getTime() + leaseMs);
 
@@ -119,7 +125,7 @@ async function claimNextRunnableRun(workerId, leaseMs = 30000) {
   );
 }
 
-async function claimRunById(runId, workerId, leaseMs = 30000) {
+async function claimRunById(runId, workerId, leaseMs = RUN_LEASE_MS) {
   if (!mongoose.Types.ObjectId.isValid(runId)) {
     const err = new Error(`invalid runId: ${runId}`);
     err.code = 'INVALID_RUN_MESSAGE';
@@ -150,6 +156,74 @@ async function claimRunById(runId, workerId, leaseMs = 30000) {
     },
     { new: true }
   );
+}
+
+async function renewRunLease(runId, workerId, leaseMs = RUN_LEASE_MS) {
+  return WorkflowRun.findOneAndUpdate(
+    {
+      _id: runId,
+      status: 'running',
+      leaseOwner: workerId
+    },
+    {
+      $set: {
+        leaseExpiresAt: new Date(Date.now() + leaseMs)
+      }
+    },
+    { new: true, projection: { _id: 1, leaseExpiresAt: 1 } }
+  );
+}
+
+// Keeps a claimed run's lease alive for as long as it is executing. Without this a
+// run that outlives its lease is flipped to retrying by recoverExpiredRunningRuns
+// and re-executed while the original execution is still in flight, so both
+// executions reach the email node and the same report is sent twice.
+function startLeaseHeartbeat({
+  runId,
+  workerId,
+  leaseMs = RUN_LEASE_MS,
+  intervalMs = LEASE_HEARTBEAT_MS,
+  renew = renewRunLease
+}) {
+  let stopped = false;
+  let inFlight = null;
+
+  if (!runId || !workerId) {
+    console.warn(`[run-queue] lease heartbeat not started run=${runId} worker=${workerId}`);
+    return { async stop() {} };
+  }
+
+  const timer = setInterval(() => {
+    if (stopped) return;
+    inFlight = (async () => {
+      try {
+        const renewed = await renew(runId, workerId, leaseMs);
+        if (!renewed && !stopped) {
+          stopped = true;
+          clearInterval(timer);
+          console.warn(`[run-queue] lease no longer held run=${runId} worker=${workerId}; stopped heartbeat`);
+        }
+      } catch (error) {
+        console.warn(`[run-queue] lease heartbeat failed run=${runId} worker=${workerId} error=${error.message}`);
+      }
+    })();
+  }, intervalMs);
+
+  if (typeof timer.unref === 'function') timer.unref();
+
+  return {
+    async stop() {
+      stopped = true;
+      clearInterval(timer);
+      if (inFlight) {
+        try {
+          await inFlight;
+        } catch (error) {
+          // renewal already logs its own failures
+        }
+      }
+    }
+  };
 }
 
 async function promoteDeferredRun(tenantId, workflowId, executionKey) {
@@ -319,9 +393,13 @@ async function recoverExpiredRunningRuns(limit = 100) {
 }
 
 module.exports = {
+  RUN_LEASE_MS,
+  LEASE_HEARTBEAT_MS,
   enqueueRun,
   claimNextRunnableRun,
   claimRunById,
+  renewRunLease,
+  startLeaseHeartbeat,
   promoteDeferredRun,
   getExecutionKey,
   publishRunDispatch,

@@ -1,6 +1,7 @@
 const {
   claimNextRunnableRun,
   claimRunById,
+  startLeaseHeartbeat,
   promoteDeferredRun,
   republishDueRetryRuns,
   bootstrapDispatchRunnableRuns,
@@ -11,7 +12,7 @@ const { getRetryDelayMs } = require('../domain/retryPolicy');
 const { getRabbitWorkflowRunQueue } = require('./runQueue/RabbitWorkflowRunQueue');
 
 async function processOne(workerId) {
-  const run = await claimNextRunnableRun(workerId, 30000);
+  const run = await claimNextRunnableRun(workerId);
   if (!run) return null;
   const workflowName = run.definitionJson?.name || 'unknown';
   console.log(`[scheduler-worker] claimed run=${run._id} workflow=${run.workflowId} workflowName="${workflowName}" tenant=${run.tenantId} attempt=${(run.attempt || 0) + 1}/${run.maxAttempts || 3} backend=mongo`);
@@ -20,6 +21,11 @@ async function processOne(workerId) {
 
 async function processClaimedRun(run) {
   if (!run) return null;
+
+  const heartbeat = startLeaseHeartbeat({
+    runId: run._id,
+    workerId: run.leaseOwner
+  });
 
   try {
     const workflowName = run.definitionJson?.name || 'unknown';
@@ -57,6 +63,8 @@ async function processClaimedRun(run) {
     await run.save();
     console.warn(`[scheduler-worker] scheduled retry run=${run._id} workflow=${run.workflowId} workflowName="${workflowName}" nextRetryAt=${run.nextRetryAt.toISOString()} delayMs=${delayMs}`);
     return { runId: run._id, status: 'retrying' };
+  } finally {
+    await heartbeat.stop();
   }
 }
 
@@ -100,7 +108,7 @@ async function runLoopRabbit({ workerId, intervalMs = 2000, stopSignal }) {
     await queue.consumeRuns({
       stopSignal,
       handler: async ({ runId }) => {
-        const run = await claimRunById(runId, workerId, 30000);
+        const run = await claimRunById(runId, workerId);
         if (!run) {
           console.log(`[scheduler-worker] skipped rabbit message run=${runId} reason=not_claimable_or_missing`);
           return;
