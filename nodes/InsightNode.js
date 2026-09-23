@@ -10,7 +10,7 @@ const {
 const { renderInsightEmail } = require('../server/lib/renderInsightEmail');
 const { sendEmail } = require('../server/services/emailService');
 
-async function InsightNode(def, context) {
+async function InsightNode(def, context, runtime = {}) {
   const { template = {}, persist, output_key, email } = def;
   const { metrics = {}, breakdowns = {} } = context;
 
@@ -145,7 +145,8 @@ async function InsightNode(def, context) {
         tenantId: context?.meta?.tenantId
       });
 
-      emailResult = await sendEmail({
+      const emailSender = runtime.emailSender || sendEmail;
+      emailResult = await emailSender({
         to: email.to,
         subject: renderedEmail.subject,
         html: renderedEmail.html,

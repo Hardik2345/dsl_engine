@@ -54,7 +54,7 @@ async function CompositeNode(def, context, nodeMapOrOptions) {
       };
     }
 
-    const result = stepDef.type === 'workflow_ref' || stepDef.type === 'email'
+    const result = stepDef.type === 'workflow_ref' || stepDef.type === 'email' || stepDef.type === 'insight'
       ? await executor(stepDef, context, runtime)
       : await executor(stepDef, context);
 

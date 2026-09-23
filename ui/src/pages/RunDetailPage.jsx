@@ -4,6 +4,7 @@ import { format } from 'date-fns';
 import { useRun } from '../api/hooks';
 import { Badge, Card, CardHeader, CardContent, CardTitle, PageSpinner } from '../components/ui';
 import InsightDetail from '../components/InsightDetail';
+import { RunStateDecisionCard } from '../components/StateEngineViews';
 import { useState } from 'react';
 
 export default function RunDetailPage() {
@@ -214,6 +215,8 @@ export default function RunDetailPage() {
               </dl>
             </CardContent>
           </Card>
+
+          <RunStateDecisionCard run={run} />
 
           {/* Execution Trace */}
           <Card>

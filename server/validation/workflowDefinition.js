@@ -29,6 +29,7 @@ const {
 const { validateRecipients } = require('../services/emailService');
 const { isSafeBindingPath } = require('../lib/emailBindings');
 const { validateEmailBranding } = require('../lib/emailBranding');
+const { WORKFLOW_PURPOSES, FINDING_DIRECTIONS, MIN_REQUIRED_EVIDENCE } = require('../lib/stateEngine/defaults');
 
 const EMAIL_FORMATS = new Set(['insight', 'report']);
 const REPORT_PRESETS = new Set(['performance_report_v1']);
@@ -180,6 +181,90 @@ function validateInsightDetailItem(detail, nodeId, errors, index) {
   });
 }
 
+const WORKFLOW_PURPOSE_VALUES = new Set(Object.values(WORKFLOW_PURPOSES));
+const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+const METRIC_KEY_RE = /^[a-z0-9_]+$/;
+
+function isNonNegativeInteger(value) {
+  return Number.isInteger(value) && value >= 0;
+}
+
+// workflow_purpose decides whether the state engine applies at all; state_config is
+// its per-workflow policy (docs/workflow-state-engine.md). A daily insight/report
+// workflow must send every run, so it may not enable state.
+function validateStateConfig(definition, errors) {
+  const purpose = definition.workflow_purpose;
+  if (purpose !== undefined && !WORKFLOW_PURPOSE_VALUES.has(purpose)) {
+    errors.push(`workflow_purpose must be one of ${Array.from(WORKFLOW_PURPOSE_VALUES).join('|')}`);
+  }
+
+  const config = definition.state_config;
+  if (config === undefined || config === null) return;
+  if (typeof config !== 'object' || Array.isArray(config)) {
+    errors.push('state_config must be an object');
+    return;
+  }
+  if (config.enabled !== undefined && typeof config.enabled !== 'boolean') {
+    errors.push('state_config.enabled must be a boolean');
+  }
+  if (config.enabled === true && purpose === WORKFLOW_PURPOSES.DAILY_INSIGHT) {
+    errors.push('state_config cannot be enabled for a daily_insight workflow');
+  }
+  if (config.enabled !== true) return;
+
+  const { finding, thresholds, cooldown, recovery, quiet_hours: quietHours } = config;
+
+  if (!finding || typeof finding !== 'object') {
+    errors.push('state_config.finding is required');
+  } else {
+    if (typeof finding.metric !== 'string' || !METRIC_KEY_RE.test(finding.metric)) {
+      errors.push('state_config.finding.metric must be a metric key like cvr_delta_pct');
+    }
+    if (!FINDING_DIRECTIONS.includes(finding.direction)) {
+      errors.push(`state_config.finding.direction must be one of ${FINDING_DIRECTIONS.join('|')}`);
+    }
+  }
+
+  if (!thresholds || typeof thresholds !== 'object') {
+    errors.push('state_config.thresholds is required');
+  } else {
+    const { normal, critical } = thresholds;
+    if (typeof normal !== 'number' || !Number.isFinite(normal) || normal < 0) {
+      errors.push('state_config.thresholds.normal must be a number >= 0');
+    }
+    if (typeof critical !== 'number' || !Number.isFinite(critical)) {
+      errors.push('state_config.thresholds.critical must be a number');
+    } else if (typeof normal === 'number' && critical <= normal) {
+      errors.push('state_config.thresholds.critical must be greater than thresholds.normal');
+    }
+  }
+
+  if (cooldown !== undefined) {
+    ['triggered_minutes', 'critical_minutes'].forEach((field) => {
+      if (cooldown?.[field] !== undefined && !isNonNegativeInteger(cooldown[field])) {
+        errors.push(`state_config.cooldown.${field} must be a whole number of minutes >= 0`);
+      }
+    });
+  }
+
+  if (recovery?.required_evidence !== undefined
+    && (!Number.isInteger(recovery.required_evidence) || recovery.required_evidence < MIN_REQUIRED_EVIDENCE)) {
+    errors.push(`state_config.recovery.required_evidence must be a whole number >= ${MIN_REQUIRED_EVIDENCE}`);
+  }
+
+  if (quietHours !== undefined) {
+    if (!quietHours || typeof quietHours !== 'object') {
+      errors.push('state_config.quiet_hours must be an object');
+    } else if (quietHours.enabled === true) {
+      ['start', 'end'].forEach((field) => {
+        if (!HHMM_RE.test(String(quietHours[field] || ''))) {
+          errors.push(`state_config.quiet_hours.${field} must be HH:MM (24h)`);
+        }
+      });
+    }
+  }
+}
+
 function validateWorkflowDefinition(definition) {
   const errors = [];
 
@@ -224,6 +309,8 @@ function validateWorkflowDefinition(definition) {
       errors.push('trigger.brandIds must be empty for global brandScope');
     }
   }
+
+  validateStateConfig(definition, errors);
 
   const nodeIds = new Set();
   for (const node of definition.nodes) {

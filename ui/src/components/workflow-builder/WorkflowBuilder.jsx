@@ -6,6 +6,7 @@ import toast from 'react-hot-toast';
 import NodeSidebar from './NodeSidebar';
 import WorkflowCanvas from './WorkflowCanvas';
 import PropertiesPanel from './PropertiesPanel';
+import AlertStatePanel from './AlertStatePanel';
 import { jsonToGraph, graphToJson } from '../../utils/workflowTransformers';
 import {
   buildDefaultBreakdownOutputKey,
@@ -13,6 +14,7 @@ import {
 import {
   getPartialDayProductCompatibilityErrors,
 } from '../../utils/workflowValidation';
+import { getStateConfigErrors } from '../../utils/stateConfig';
 
 const sanitizeIdSegment = (value) =>
   String(value || '')
@@ -312,6 +314,11 @@ function WorkflowBuilderContent({
         toast.error(compatibilityErrors[0]);
         return;
       }
+      const stateConfigErrors = getStateConfigErrors(workflowJson);
+      if (stateConfigErrors.length) {
+        toast.error(stateConfigErrors[0]);
+        return;
+      }
       // Validate or cleanup
       await onSave(workflowJson);
     } catch (error) {
@@ -379,6 +386,8 @@ function WorkflowBuilderContent({
           </button>
         </div>
       </div>
+
+      <AlertStatePanel metadata={metadata} setMetadata={setMetadata} />
 
       {!isEditing && (
         <div className="bg-gray-50 border-b border-gray-200 px-4 py-3">
