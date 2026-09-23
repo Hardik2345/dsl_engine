@@ -527,11 +527,19 @@ export default function PropertiesPanel({
                 value={data.format || 'insight'}
                 onChange={(e) => {
                   const format = e.target.value;
-                  const newData = {
-                    ...data,
-                    format,
-                    template: format === 'report' ? createDefaultReportTemplate() : { insightSource: 'scratch.finalInsight' }
-                  };
+                  const newData = { ...data, format };
+                  if (format === 'report') {
+                    newData.template = createDefaultReportTemplate();
+                    delete newData.for_each;
+                  } else if (format === 'finding') {
+                    // format:'finding' needs no template (see server-side
+                    // validateEmailNode) -- it fans out per item in for_each instead.
+                    delete newData.template;
+                    newData.for_each = newData.for_each || 'alertStates.transitions';
+                  } else {
+                    newData.template = { insightSource: 'scratch.finalInsight' };
+                    delete newData.for_each;
+                  }
                   setData(newData);
                   onChange(selectedNode.id, newData);
                 }}
@@ -539,8 +547,26 @@ export default function PropertiesPanel({
               >
                 <option value="insight">Insight</option>
                 <option value="report">Report</option>
+                <option value="finding">Finding (per-finding fan-out from alert_state)</option>
               </select>
             </div>
+
+            {data.format === 'finding' && (
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">For each (array context path)</label>
+                <input
+                  value={data.for_each || ''}
+                  onChange={(e) => handleChange('for_each', e.target.value)}
+                  placeholder="alertStates.transitions"
+                  className="w-full border p-2 rounded text-sm font-mono"
+                />
+                <div className="text-[10px] text-gray-400 mt-1">
+                  One email is rendered and sent per notify-worthy item in this array --
+                  normally the transitions published by an upstream alert_state node.
+                  Subject/template are ignored for this format.
+                </div>
+              </div>
+            )}
 
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Recipients</label>
@@ -609,7 +635,7 @@ export default function PropertiesPanel({
                   ))}
                 </div>
               </>
-            ) : (
+            ) : data.format === 'finding' ? null : (
               <div className="pt-3 border-t">
                 <label className="block text-xs font-medium text-gray-500 mb-1">Insight Source</label>
                 <input value={data.template?.insightSource || 'scratch.finalInsight'} onChange={(e) => handleChange('template', { insightSource: e.target.value })} className="w-full border p-2 rounded text-sm font-mono" />
@@ -1234,6 +1260,423 @@ export default function PropertiesPanel({
                 </button>
             </div>
         );
+
+      case 'alert_state': {
+        const updateBreachList = (breachKey, list) => handleChange('breach', { ...(data.breach || {}), [breachKey]: list });
+        const renderConditionRows = (label, breachKey, list) => (
+          <div className="mb-4">
+            <datalist id="alert-state-metric-options">
+              {BRANCH_METRIC_OPTIONS.map((metric) => (
+                <option key={metric} value={metric} />
+              ))}
+            </datalist>
+            <div className="text-xs font-medium text-gray-500 mb-1">{label}</div>
+            {(list || []).map((cond, idx) => (
+              <div key={idx} className="flex gap-1 mb-1">
+                <input
+                  className="w-1/3 border p-1 rounded text-xs"
+                  placeholder="metric"
+                  list="alert-state-metric-options"
+                  value={cond.metric || ''}
+                  onChange={(e) => {
+                    const next = [...(list || [])];
+                    next[idx] = { ...next[idx], metric: e.target.value };
+                    updateBreachList(breachKey, next);
+                  }}
+                />
+                <select
+                  className="w-1/4 border p-1 rounded text-xs"
+                  value={cond.op || '<'}
+                  onChange={(e) => {
+                    const next = [...(list || [])];
+                    next[idx] = { ...next[idx], op: e.target.value };
+                    updateBreachList(breachKey, next);
+                  }}
+                >
+                  {['<', '<=', '>', '>=', '==', '!='].map((op) => <option key={op} value={op}>{op}</option>)}
+                </select>
+                <input
+                  className="w-1/4 border p-1 rounded text-xs"
+                  placeholder="value (e.g. -10)"
+                  value={cond.value ?? ''}
+                  onChange={(e) => {
+                    // Store the raw string as typed -- coercing to Number on every
+                    // keystroke breaks intermediate states like "-" or "-1" (Number("-")
+                    // is NaN, and a controlled input showing NaN can no longer be typed
+                    // into normally). The runtime (BranchNode's evaluate(), reused by
+                    // AlertStateNode) already parseFloat()s a string value, so shipping
+                    // "-10" as a string is safe end to end -- same pattern the existing
+                    // branch-node condition value input already uses.
+                    const next = [...(list || [])];
+                    next[idx] = { ...next[idx], value: e.target.value };
+                    updateBreachList(breachKey, next);
+                  }}
+                />
+                <button
+                  onClick={() => {
+                    const next = [...(list || [])];
+                    next.splice(idx, 1);
+                    updateBreachList(breachKey, next);
+                  }}
+                  className="p-1 hover:bg-red-50 text-red-500 rounded"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
+            <button
+              onClick={() => updateBreachList(breachKey, [...(list || []), { metric: '', op: '<', value: '' }])}
+              className="w-full py-1 border border-dashed text-gray-500 rounded text-xs hover:border-gray-400 flex items-center justify-center gap-1"
+            >
+              <Plus className="w-3 h-3" /> Add condition
+            </button>
+          </div>
+        );
+
+        return (
+          <div className="space-y-4">
+            <datalist id="alert-state-base-metric-options">
+              {METRIC_OPTIONS.map((metric) => (
+                <option key={metric} value={metric} />
+              ))}
+            </datalist>
+            <div>
+              <div className="text-sm font-medium text-gray-700 mb-1">Sources</div>
+              <div className="text-xs text-gray-500 mb-2">Breakdown output keys this node tracks as findings.</div>
+              {(data.sources || []).map((source, idx) => (
+                <div key={idx} className="flex gap-1 mb-2">
+                  <div className="w-2/5">
+                    <OutputKeyInput
+                      value={source.output_key || ''}
+                      onChange={(nextValue) => {
+                        const next = [...(data.sources || [])];
+                        next[idx] = { ...next[idx], output_key: nextValue };
+                        handleChange('sources', next);
+                      }}
+                      placeholder="output_key"
+                      suggestions={Array.from(new Set(breakdownOutputKeySuggestions))}
+                    />
+                  </div>
+                  <input
+                    className="w-1/4 border p-1 rounded text-xs"
+                    placeholder="metric (cvr)"
+                    list="alert-state-base-metric-options"
+                    value={source.metric || ''}
+                    onChange={(e) => {
+                      const next = [...(data.sources || [])];
+                      next[idx] = { ...next[idx], metric: e.target.value };
+                      handleChange('sources', next);
+                    }}
+                  />
+                  <select
+                    className="w-1/4 border p-1 rounded text-xs"
+                    value={source.direction || 'drop'}
+                    onChange={(e) => {
+                      const next = [...(data.sources || [])];
+                      next[idx] = { ...next[idx], direction: e.target.value };
+                      handleChange('sources', next);
+                    }}
+                  >
+                    <option value="drop">drop</option>
+                    <option value="increase">increase</option>
+                  </select>
+                  <button
+                    onClick={() => {
+                      const next = [...(data.sources || [])];
+                      next.splice(idx, 1);
+                      handleChange('sources', next);
+                    }}
+                    className="p-1 hover:bg-red-50 text-red-500 rounded"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+              <button
+                onClick={() => handleChange('sources', [...(data.sources || []), { output_key: '', metric: 'cvr', direction: 'drop' }])}
+                className="w-full py-1 border border-dashed text-gray-500 rounded text-xs hover:border-gray-400 flex items-center justify-center gap-1"
+              >
+                <Plus className="w-3 h-3" /> Add source
+              </button>
+            </div>
+
+            {renderConditionRows('Breach enter (opens a finding)', 'enter', data.breach?.enter)}
+            {renderConditionRows('Breach exit (clears a finding)', 'exit', data.breach?.exit)}
+
+            <div className="grid grid-cols-2 gap-2 mb-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">
+                  Consecutive breaches to open
+                </label>
+                <input
+                  type="number" min="1"
+                  className="w-full text-sm border-gray-300 rounded-md shadow-sm"
+                  placeholder="1 (event-triggered) / 2 (cron)"
+                  value={data.breach?.for_observations ?? ''}
+                  onChange={(e) => {
+                    const breach = { ...(data.breach || {}) };
+                    if (e.target.value === '') delete breach.for_observations;
+                    else breach.for_observations = Number(e.target.value);
+                    handleChange('breach', breach);
+                  }}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">
+                  Consecutive clean reads to resolve
+                </label>
+                <input
+                  type="number" min="1"
+                  className="w-full text-sm border-gray-300 rounded-md shadow-sm"
+                  placeholder="2"
+                  value={data.breach?.clear_after_observations ?? ''}
+                  onChange={(e) => {
+                    const breach = { ...(data.breach || {}) };
+                    if (e.target.value === '') delete breach.clear_after_observations;
+                    else breach.clear_after_observations = Number(e.target.value);
+                    handleChange('breach', breach);
+                  }}
+                />
+              </div>
+            </div>
+
+            <div className="mb-4">
+              <div className="text-xs font-medium text-gray-500 mb-1">
+                Severity tiers (checked top to bottom; first match wins)
+              </div>
+              {(data.severity_tiers || []).map((tier, idx) => (
+                <div key={idx} className="border border-gray-200 rounded p-2 mb-2">
+                  <div className="flex gap-1 mb-1">
+                    <input
+                      className="w-2/5 border p-1 rounded text-xs"
+                      placeholder="tier name (critical)"
+                      value={tier.name || ''}
+                      onChange={(e) => {
+                        const next = [...(data.severity_tiers || [])];
+                        next[idx] = { ...next[idx], name: e.target.value };
+                        handleChange('severity_tiers', next);
+                      }}
+                    />
+                    <button
+                      onClick={() => {
+                        const next = [...(data.severity_tiers || [])];
+                        next.splice(idx, 1);
+                        handleChange('severity_tiers', next);
+                      }}
+                      className="p-1 hover:bg-red-50 text-red-500 rounded"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                  {(tier.when || []).map((cond, condIdx) => (
+                    <div key={condIdx} className="flex gap-1 mb-1">
+                      <input
+                        className="w-1/3 border p-1 rounded text-xs"
+                        placeholder="metric"
+                        list="alert-state-metric-options"
+                        value={cond.metric || ''}
+                        onChange={(e) => {
+                          const next = [...(data.severity_tiers || [])];
+                          const when = [...(next[idx].when || [])];
+                          when[condIdx] = { ...when[condIdx], metric: e.target.value };
+                          next[idx] = { ...next[idx], when };
+                          handleChange('severity_tiers', next);
+                        }}
+                      />
+                      <select
+                        className="w-1/4 border p-1 rounded text-xs"
+                        value={cond.op || '<'}
+                        onChange={(e) => {
+                          const next = [...(data.severity_tiers || [])];
+                          const when = [...(next[idx].when || [])];
+                          when[condIdx] = { ...when[condIdx], op: e.target.value };
+                          next[idx] = { ...next[idx], when };
+                          handleChange('severity_tiers', next);
+                        }}
+                      >
+                        {['<', '<=', '>', '>=', '==', '!='].map((op) => <option key={op} value={op}>{op}</option>)}
+                      </select>
+                      <input
+                        className="w-1/4 border p-1 rounded text-xs"
+                        placeholder="value (e.g. -20)"
+                        value={cond.value ?? ''}
+                        onChange={(e) => {
+                          // See the breach-condition comment above: store the raw
+                          // string, never Number()-coerce on every keystroke.
+                          const next = [...(data.severity_tiers || [])];
+                          const when = [...(next[idx].when || [])];
+                          when[condIdx] = { ...when[condIdx], value: e.target.value };
+                          next[idx] = { ...next[idx], when };
+                          handleChange('severity_tiers', next);
+                        }}
+                      />
+                      <button
+                        onClick={() => {
+                          const next = [...(data.severity_tiers || [])];
+                          const when = [...(next[idx].when || [])];
+                          when.splice(condIdx, 1);
+                          next[idx] = { ...next[idx], when };
+                          handleChange('severity_tiers', next);
+                        }}
+                        className="p-1 hover:bg-red-50 text-red-500 rounded"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    onClick={() => {
+                      const next = [...(data.severity_tiers || [])];
+                      next[idx] = { ...next[idx], when: [...(next[idx].when || []), { metric: '', op: '<', value: 0 }] };
+                      handleChange('severity_tiers', next);
+                    }}
+                    className="w-full py-1 border border-dashed text-gray-500 rounded text-xs hover:border-gray-400 flex items-center justify-center gap-1"
+                  >
+                    <Plus className="w-3 h-3" /> Add condition to tier
+                  </button>
+                </div>
+              ))}
+              <button
+                onClick={() => handleChange('severity_tiers', [...(data.severity_tiers || []), { name: '', when: [{ metric: '', op: '<', value: 0 }] }])}
+                className="w-full py-1 border border-dashed text-gray-500 rounded text-xs hover:border-gray-400 flex items-center justify-center gap-1"
+              >
+                <Plus className="w-3 h-3" /> Add severity tier
+              </button>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Notify: min interval</label>
+              <input
+                type="text"
+                className="w-full text-sm border-gray-300 rounded-md shadow-sm"
+                placeholder="24h"
+                value={data.notify_policy?.min_interval || ''}
+                onChange={(e) => handleChange('notify_policy', { ...(data.notify_policy || {}), min_interval: e.target.value })}
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">
+                Burst cap: max immediate sends per run — 0 routes everything to a combined digest instead
+              </label>
+              <input
+                type="number" min="0"
+                className="w-full text-sm border-gray-300 rounded-md shadow-sm"
+                placeholder="5"
+                value={data.notify_policy?.burst_cap?.max_immediate ?? ''}
+                onChange={(e) => {
+                  const burstCap = { ...(data.notify_policy?.burst_cap || {}) };
+                  if (e.target.value === '') delete burstCap.max_immediate;
+                  else burstCap.max_immediate = Number(e.target.value);
+                  handleChange('notify_policy', { ...(data.notify_policy || {}), burst_cap: burstCap });
+                }}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Quiet hours start (HH:MM, tenant tz) — leave blank to disable</label>
+                <input
+                  type="text"
+                  className="w-full text-sm border-gray-300 rounded-md shadow-sm"
+                  placeholder="22:00"
+                  value={data.notify_policy?.quiet_hours?.start || ''}
+                  onChange={(e) => {
+                    const quietHours = { ...(data.notify_policy?.quiet_hours || {}) };
+                    if (e.target.value === '') delete quietHours.start;
+                    else quietHours.start = e.target.value;
+                    handleChange('notify_policy', { ...(data.notify_policy || {}), quiet_hours: quietHours });
+                  }}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Quiet hours end (HH:MM)</label>
+                <input
+                  type="text"
+                  className="w-full text-sm border-gray-300 rounded-md shadow-sm"
+                  placeholder="07:00"
+                  value={data.notify_policy?.quiet_hours?.end || ''}
+                  onChange={(e) => {
+                    const quietHours = { ...(data.notify_policy?.quiet_hours || {}) };
+                    if (e.target.value === '') delete quietHours.end;
+                    else quietHours.end = e.target.value;
+                    handleChange('notify_policy', { ...(data.notify_policy || {}), quiet_hours: quietHours });
+                  }}
+                />
+              </div>
+            </div>
+
+            <label className="flex items-center gap-2 text-xs text-gray-600">
+              <input
+                type="checkbox"
+                checked={data.notify_policy?.critical_bypass?.enabled !== false}
+                onChange={(e) => handleChange('notify_policy', {
+                  ...(data.notify_policy || {}),
+                  critical_bypass: { ...(data.notify_policy?.critical_bypass || {}), enabled: e.target.checked },
+                })}
+              />
+              Let a critical-severity reading skip cooldown/quiet-hours/flap demotion
+            </label>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Flap window (hours)</label>
+                <input
+                  type="number" min="1"
+                  className="w-full text-sm border-gray-300 rounded-md shadow-sm"
+                  placeholder="72"
+                  value={data.notify_policy?.flap?.window_ms ? data.notify_policy.flap.window_ms / 3600000 : ''}
+                  onChange={(e) => {
+                    const hours = Number(e.target.value);
+                    const flap = { ...(data.notify_policy?.flap || {}) };
+                    if (e.target.value === '' || Number.isNaN(hours)) delete flap.window_ms;
+                    else flap.window_ms = hours * 3600000;
+                    handleChange('notify_policy', { ...(data.notify_policy || {}), flap });
+                  }}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Flap max episodes</label>
+                <input
+                  type="number" min="1"
+                  className="w-full text-sm border-gray-300 rounded-md shadow-sm"
+                  placeholder="3"
+                  value={data.notify_policy?.flap?.max_episodes ?? ''}
+                  onChange={(e) => {
+                    const flap = { ...(data.notify_policy?.flap || {}) };
+                    if (e.target.value === '') delete flap.max_episodes;
+                    else flap.max_episodes = Number(e.target.value);
+                    handleChange('notify_policy', { ...(data.notify_policy || {}), flap });
+                  }}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Stale after (hours) — leave blank to disable</label>
+              <input
+                type="number" min="1"
+                className="w-full text-sm border-gray-300 rounded-md shadow-sm"
+                placeholder="disabled"
+                value={data.notify_policy?.stale_after ? data.notify_policy.stale_after / 3600000 : ''}
+                onChange={(e) => {
+                  const hours = Number(e.target.value);
+                  const notifyPolicy = { ...(data.notify_policy || {}) };
+                  if (e.target.value === '' || Number.isNaN(hours)) delete notifyPolicy.stale_after;
+                  else notifyPolicy.stale_after = hours * 3600000;
+                  handleChange('notify_policy', notifyPolicy);
+                }}
+              />
+            </div>
+
+            <div className="text-[10px] text-gray-400 border-t pt-2">
+              Connect this node's two outputs on the canvas to route it: one edge for
+              "Changed" (routes when any finding opened, worsened, or resolved) and
+              one for "No changes" (routes when nothing changed this run).
+            </div>
+          </div>
+        );
+      }
 
       case 'workflow_ref':
         return (

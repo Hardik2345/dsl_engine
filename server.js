@@ -15,6 +15,8 @@ const scheduleRoutes = require('./server/routes/schedules');
 const triggerRoutes = require('./server/routes/triggers');
 const schedulerRoutes = require('./server/routes/scheduler');
 const alertsIngestRoutes = require('./server/routes/alertsIngest');
+const findingRoutes = require('./server/routes/findings');
+const notificationRoutes = require('./server/routes/notifications');
 
 const app = express();
 app.set('trust proxy', 1);
@@ -42,6 +44,11 @@ app.use(cors({
 }));
 
 app.use(express.json({ limit: '2mb' }));
+// The signed-link confirmation page (server/lib/actionConfirmationPage.js) is a
+// plain HTML <form> with no JS, so its POST arrives as
+// application/x-www-form-urlencoded, not JSON -- without this, req.body would be
+// empty for that one route.
+app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
 app.get('/health', (req, res) => {
@@ -68,6 +75,8 @@ app.use('/tenants/:tenantId/insights', insightRoutes);
 app.use('/tenants/:tenantId/triggers', triggerRoutes);
 app.use('/tenants/:tenantId/scheduler', schedulerRoutes);
 app.use('/tenants', alertsIngestRoutes);
+app.use('/tenants/:tenantId/findings', findingRoutes);
+app.use('/tenants/:tenantId/notifications', notificationRoutes);
 
 app.use((err, req, res, next) => {
   const status = err.status || 500;

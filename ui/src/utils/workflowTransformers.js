@@ -32,6 +32,7 @@ export const jsonToGraph = (workflowJson) => {
     if (n.type === 'composite') type = 'composite';
     if (n.type === 'workflow_ref') type = 'workflow_ref';
     if (n.type === 'email') type = 'email';
+    if (n.type === 'alert_state') type = 'alert_state';
     if (n.id === 'trigger') type = 'trigger'; // hypothetical
 
     // For branch nodes, ensure each rule has a stable _ruleId
@@ -70,6 +71,33 @@ export const jsonToGraph = (workflowJson) => {
         type: 'deletable',
         markerEnd: { type: MarkerType.ArrowClosed },
       });
+    }
+
+    // alert_state nodes route via then/then_no_changes rather than next.
+    if (n.type === 'alert_state') {
+      if (n.then) {
+        edges.push({
+          id: `${n.id}-then-${n.then}`,
+          source: n.id,
+          sourceHandle: 'handle-then',
+          target: n.then,
+          type: 'deletable',
+          label: 'Changed',
+          markerEnd: { type: MarkerType.ArrowClosed },
+        });
+      }
+      if (n.then_no_changes) {
+        edges.push({
+          id: `${n.id}-then_no_changes-${n.then_no_changes}`,
+          source: n.id,
+          sourceHandle: 'handle-then-no-changes',
+          target: n.then_no_changes,
+          type: 'deletable',
+          label: 'No changes',
+          markerEnd: { type: MarkerType.ArrowClosed },
+          animated: true,
+        });
+      }
     }
 
     // Branch nodes have routing logic
@@ -212,6 +240,21 @@ export const graphToJson = (nodes, edges, initialMetadata) => {
       }
 
       delete backendNode.next; // Branches typically don't have a single next
+    } else if (node.type === 'alert_state') {
+      // alert_state routes via then/then_no_changes, never next.
+      const thenEdge = outgoingEdges.find(e => e.sourceHandle === 'handle-then');
+      const thenNoChangesEdge = outgoingEdges.find(e => e.sourceHandle === 'handle-then-no-changes');
+      if (thenEdge && idMap.has(thenEdge.target)) {
+        backendNode.then = idMap.get(thenEdge.target);
+      } else {
+        delete backendNode.then;
+      }
+      if (thenNoChangesEdge && idMap.has(thenNoChangesEdge.target)) {
+        backendNode.then_no_changes = idMap.get(thenNoChangesEdge.target);
+      } else {
+        delete backendNode.then_no_changes;
+      }
+      delete backendNode.next;
     } else {
       // Standard nodes
       const nextEdge = outgoingEdges[0]; // Assuming single output for standard nodes

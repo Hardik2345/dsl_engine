@@ -6,6 +6,8 @@ import WorkflowRunsPage from './pages/WorkflowRunsPage';
 import RunsPage from './pages/RunsPage';
 import RunDetailPage from './pages/RunDetailPage';
 import InsightsPage from './pages/InsightsPage';
+import FindingsPage from './pages/FindingsPage';
+import FindingDetailPage from './pages/FindingDetailPage';
 import SettingsPage from './pages/SettingsPage';
 import WorkflowBuilderPage from './pages/WorkflowBuilderPage';
 import Login from './pages/Login';
@@ -47,6 +49,11 @@ function App() {
         <Route path="/workflows/:workflowId/runs" element={<WorkflowRunsPage />} />
         <Route path="/workflows/:workflowId/runs/:runId" element={<RunDetailPage />} />
         <Route path="/insights" element={<InsightsPage />} />
+        {/* Bare paths, not /tenants/:tenantId/findings -- every page route in this
+            app reads tenantId from TenantContext, not the URL; only the backend
+            API routes use the /tenants/:tenantId/... prefix. */}
+        <Route path="/findings" element={<FindingsPage />} />
+        <Route path="/findings/:stateKey" element={<FindingDetailPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

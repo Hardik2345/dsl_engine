@@ -18,6 +18,18 @@ function requireBinding(root, path) {
   return resolved.value;
 }
 
+// New state-derived bindings (finding/digest presets) must use this rather than
+// requireBinding -- existing report workflows have no state history at all, and
+// tightening the required check instead of adding this would break them (design
+// doc §12.4).
+function resolveOptionalBinding(root, path, fallback = null) {
+  const resolved = resolveBinding(root, path);
+  if (!resolved.found || resolved.value === undefined || resolved.value === null) {
+    return fallback;
+  }
+  return resolved.value;
+}
+
 function formatValue(value, format = 'text') {
   if (format === 'text') return String(value ?? '');
   const number = Number(value);
@@ -168,4 +180,4 @@ function renderReportEmail({ context, template, branding, subject }) {
   return { subject, html, text, viewModel: view };
 }
 
-module.exports = { renderReportEmail, buildReportViewModel, formatValue };
+module.exports = { renderReportEmail, buildReportViewModel, formatValue, resolveOptionalBinding };

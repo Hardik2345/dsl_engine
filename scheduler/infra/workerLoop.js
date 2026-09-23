@@ -10,6 +10,15 @@ const {
 const { executeRun } = require('../../server/services/workflowExecutionService');
 const { getRetryDelayMs } = require('../domain/retryPolicy');
 const { getRabbitWorkflowRunQueue } = require('./runQueue/RabbitWorkflowRunQueue');
+const { sweepOpenDigests, sweepPendingDeliveries, sweepStaleFindings } = require('../../server/services/notificationService');
+
+const DIGEST_SWEEP_TICK_MS = Number(process.env.NOTIFY_DIGEST_SWEEP_TICK_MS || 60000);
+// Gap #2: this is now the real send path (the per-run pipeline only writes a
+// pending row), so it runs much more often than the digest sweep.
+const PENDING_SWEEP_TICK_MS = Number(process.env.NOTIFY_PENDING_SWEEP_TICK_MS || 15000);
+// Staleness is inherently slow-moving -- a coarse tick is fine and avoids
+// hammering AlertState/Workflow lookups for something that changes over hours/days.
+const STALE_SWEEP_TICK_MS = Number(process.env.NOTIFY_STALE_SWEEP_TICK_MS || 15 * 60 * 1000);
 
 async function processOne(workerId) {
   const run = await claimNextRunnableRun(workerId);
@@ -73,9 +82,44 @@ function useRabbitRunQueue() {
 }
 
 async function runLoopMongo({ workerId, intervalMs = 2000, stopSignal }) {
+  // No independent timer exists on this backend (unlike runLoopRabbit's retry
+  // timer), so each sweep is interleaved into this sequential loop instead --
+  // checked once per iteration rather than run on every single iteration.
+  let lastDigestSweepAt = 0;
+  let lastPendingSweepAt = 0;
+  let lastStaleSweepAt = 0;
+
   while (!stopSignal.stopped) {
     try {
       await recoverExpiredRunningRuns();
+
+      if (Date.now() - lastPendingSweepAt >= PENDING_SWEEP_TICK_MS) {
+        lastPendingSweepAt = Date.now();
+        try {
+          await sweepPendingDeliveries();
+        } catch (error) {
+          console.error('[notify] pending delivery sweep failed', error.message);
+        }
+      }
+
+      if (Date.now() - lastDigestSweepAt >= DIGEST_SWEEP_TICK_MS) {
+        lastDigestSweepAt = Date.now();
+        try {
+          await sweepOpenDigests();
+        } catch (error) {
+          console.error('[notify] digest sweep failed', error.message);
+        }
+      }
+
+      if (Date.now() - lastStaleSweepAt >= STALE_SWEEP_TICK_MS) {
+        lastStaleSweepAt = Date.now();
+        try {
+          await sweepStaleFindings();
+        } catch (error) {
+          console.error('[notify] stale sweep failed', error.message);
+        }
+      }
+
       const result = await processOne(workerId);
       if (!result) {
         await new Promise(resolve => setTimeout(resolve, intervalMs));
@@ -104,6 +148,39 @@ async function runLoopRabbit({ workerId, intervalMs = 2000, stopSignal }) {
     }
   }, retryTickMs);
 
+  // Piggybacks on the existing retry timer's own throttle rather than adding a
+  // separate setInterval per sweep -- this backend already has a periodic tick,
+  // matching the design's §8.4 "loop hung off the existing worker tick."
+  let lastDigestSweepAt = 0;
+  let lastPendingSweepAt = 0;
+  let lastStaleSweepAt = 0;
+  const notifySweepTimer = setInterval(async () => {
+    if (Date.now() - lastPendingSweepAt >= PENDING_SWEEP_TICK_MS) {
+      lastPendingSweepAt = Date.now();
+      try {
+        await sweepPendingDeliveries();
+      } catch (error) {
+        console.error('[notify] pending delivery sweep failed', error.message);
+      }
+    }
+    if (Date.now() - lastDigestSweepAt >= DIGEST_SWEEP_TICK_MS) {
+      lastDigestSweepAt = Date.now();
+      try {
+        await sweepOpenDigests();
+      } catch (error) {
+        console.error('[notify] digest sweep failed', error.message);
+      }
+    }
+    if (Date.now() - lastStaleSweepAt >= STALE_SWEEP_TICK_MS) {
+      lastStaleSweepAt = Date.now();
+      try {
+        await sweepStaleFindings();
+      } catch (error) {
+        console.error('[notify] stale sweep failed', error.message);
+      }
+    }
+  }, Math.min(retryTickMs, PENDING_SWEEP_TICK_MS));
+
   try {
     await queue.consumeRuns({
       stopSignal,
@@ -120,6 +197,7 @@ async function runLoopRabbit({ workerId, intervalMs = 2000, stopSignal }) {
     });
   } finally {
     clearInterval(retryTimer);
+    clearInterval(notifySweepTimer);
     await queue.close();
   }
 }

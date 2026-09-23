@@ -8,6 +8,7 @@ const branchNode = require('../nodes/BranchNode');
 const insightNode = require('../nodes/InsightNode');
 const workflowRefNode = require('../nodes/WorkflowRefNode');
 const emailNode = require('../nodes/EmailNode');
+const alertStateNode = require('../nodes/AlertStateNode');
 
 const NodeRegistry = {
   validation: validationNode,
@@ -17,7 +18,8 @@ const NodeRegistry = {
   branch: branchNode,
   workflow_ref: workflowRefNode,
   insight: insightNode,
-  email: emailNode
+  email: emailNode,
+  alert_state: alertStateNode
 };
 
 const DEFAULT_MAX_EXECUTION_STEPS = 100;
@@ -119,12 +121,11 @@ class WorkflowRunner {
 
       const runtime = this.createNodeRuntime({ nodeMap, workflowIdentity, sharedState });
 
+      const NEEDS_RUNTIME = new Set(['workflow_ref', 'email', 'alert_state']);
       const result = nodeDef.type === 'composite'
         ? await executor(nodeDef, context, { nodeMap, runtime })
-        : nodeDef.type === 'workflow_ref'
+        : NEEDS_RUNTIME.has(nodeDef.type)
           ? await executor(nodeDef, context, runtime)
-          : nodeDef.type === 'email'
-            ? await executor(nodeDef, context, runtime)
           : await executor(nodeDef, context);
 
       if (this.options.onNodeResult) {
@@ -183,7 +184,13 @@ class WorkflowRunner {
     return {
       nodeMap,
       workflowIdentity,
+      // §11.1: the root workflow identity (not the current, possibly-nested-via-
+      // workflow_ref frame identity) is what default per-workflow state scoping must
+      // key on, so refactoring a monolithic workflow into workflow_ref children does
+      // not silently reset every open finding.
+      rootWorkflowIdentity: sharedState.workflowStack[0] || workflowIdentity,
       emailSender: this.options.emailSender,
+      alertStateReader: this.options.alertStateReader,
       executeWorkflowReference: async (nodeDef, context) =>
         this.executeWorkflowReference(nodeDef, context, { workflowIdentity, sharedState })
     };

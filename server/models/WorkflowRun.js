@@ -39,7 +39,15 @@ const WorkflowRunSchema = new mongoose.Schema(
     lastError: { type: String, default: null },
     startedAt: { type: Date, required: true },
     finishedAt: { type: Date },
-    retentionExpiresAt: { type: Date, default: null }
+    retentionExpiresAt: { type: Date, default: null },
+    // Phase 2 (docs/state-based-alerting-design.md §11.3): surfaces notification
+    // delivery outcome without adding a new terminal run status -- a run whose
+    // analysis succeeded but whose notification failed stays 'completed' and
+    // therefore is never re-queued for re-execution (see §11.3's two-list hazard
+    // this sidesteps: WorkflowRun.js's TERMINAL_STATUSES and retention.js's own
+    // separately-maintained copy would otherwise both need editing).
+    notificationStatus: { type: String, default: null },
+    notificationError: { type: String, default: null }
   },
   { timestamps: true }
 );

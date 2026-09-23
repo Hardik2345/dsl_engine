@@ -6,7 +6,12 @@ const branchNode = require('./BranchNode');
 const insightNode = require('./InsightNode');
 const workflowRefNode = require('./WorkflowRefNode');
 const emailNode = require('./EmailNode');
+const alertStateNode = require('./AlertStateNode');
 
+// Kept in sync with engine/WorkflowRunner.js's NodeRegistry by
+// tests/composite-registry-parity.test.js -- this copy exists because CompositeNode
+// controls its own step loop rather than delegating to WorkflowRunner, not because
+// the two registries are meant to diverge.
 const NodeRegistry = {
   validation: validationNode,
   metric_compare: metricCompareNode,
@@ -14,7 +19,13 @@ const NodeRegistry = {
   branch: branchNode,
   workflow_ref: workflowRefNode,
   insight: insightNode,
-  email: emailNode
+  email: emailNode,
+  // alert_state is rejected inside composite.steps at validation time (design §11.2,
+  // since this loop never reads a step's own next/routing output regardless of
+  // type) -- registered anyway so a hand-edited or pre-existing workflow that
+  // bypasses validation fails with a clear node-level reason, not an undefined
+  // registry lookup.
+  alert_state: alertStateNode
 };
 
 async function CompositeNode(def, context, nodeMapOrOptions) {
@@ -54,7 +65,8 @@ async function CompositeNode(def, context, nodeMapOrOptions) {
       };
     }
 
-    const result = stepDef.type === 'workflow_ref' || stepDef.type === 'email'
+    const NEEDS_RUNTIME = new Set(['workflow_ref', 'email', 'alert_state']);
+    const result = NEEDS_RUNTIME.has(stepDef.type)
       ? await executor(stepDef, context, runtime)
       : await executor(stepDef, context);
 

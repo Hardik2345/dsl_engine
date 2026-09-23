@@ -77,6 +77,7 @@ Three layers are required, and they are independent:
 | 6 | Human controls | Ack, snooze and mute in v1, with signed action links and a UI surface. |
 | 7 | Observation series | Yes. Per-finding time series in v1, powering trend text and the UI timeline. |
 | 8 | Burst handling | Cap immediate sends per run, roll the overflow into one digest mail. |
+| 9 | Critical bypass | A finding's first breaching observation, or any observation that crosses into the `critical` severity tier, sends immediately — ignoring `for_observations`, cooldown, flap demotion and quiet hours. Human overrides (mute/snooze) and dry run still win. Every later observation of that same finding is gated normally (§6.6). |
 
 ## 4. Architecture
 
@@ -222,8 +223,9 @@ Stored per finding: `firstSeenAt`, `lastSeenAt`, `lastNotifiedAt`,
 
 | Transition | Default action |
 |---|---|
-| absent → `new` | Notify. |
+| absent → `new` | Notify. Bypasses `for_observations` if the first observation is already `critical` severity (§6.6). |
 | `active` → `active`, magnitude within band | Suppress, bump counters. |
+| `active` → `active`, first crossing into `critical` severity_tier this episode | Notify immediately, bypassing flap/cooldown/quiet-hours (§6.6). |
 | `active` → `active`, worsened past `significance.delta_pct` or crossed a severity tier | Notify as escalation. |
 | `active` → `active`, `reminder_after` elapsed | Optional reminder ("still open, day 7"). Off by default. |
 | `active` → `resolved` | Notify recovery (decision #2). |
@@ -274,6 +276,59 @@ Inconclusive observations update `lastSeenAt` and `inconclusiveStreak` only. The
 never touch `consecutiveClean` or `consecutiveBreach`, and never notify. A long
 `inconclusiveStreak` transitions the finding to `stale` rather than `resolved`.
 
+### 6.6 Critical Bypass
+
+Hysteresis (§6.4) exists to stop a metric hovering near threshold from spamming.
+It should never be the reason a brand-new, already-severe problem sits silent for
+an extra observation cycle waiting for `for_observations` to be satisfied, or gets
+held behind a stale `min_interval` cooldown from an unrelated earlier notification.
+
+The old alert-engine already made this call for its own state machine: a
+`NORMAL → CRITICAL` jump skips its cooldown check outright, while every softer
+transition still respects it. This design carries the same intent forward, widened
+to cover every gate that exists here but did not exist there (`for_observations`,
+flap demotion, quiet hours).
+
+**Trigger condition** — either of:
+
+1. `absent → new` where the very first observation's `severity_tier` (§9.1) is
+   `critical`. Normally this would wait for `for_observations` consecutive
+   breaches; the critical bypass fires on observation one.
+2. Any observation, on an already-open finding, whose `severity_tier` crosses
+   into `critical` for the first time in the current episode (not on every
+   subsequent critical reading — only the crossing).
+
+**What is bypassed**: `for_observations` (§6.4.2), flap demotion (§7 step 6),
+cooldown / `min_interval` and `AlertShadow.cooldownMinutes` (§7 step 7), and quiet
+hours (§7 step 9).
+
+**What still applies**: dry run (§7 step 1) — a rerun must never send mail
+regardless of severity; human overrides (§7 step 5) — an operator who muted or
+snoozed a finding meant that, critical or not; the ledger's unique dedupe key
+(§7 step 13) — retries of the same bypass observation still send exactly once;
+and burst/rate caps (§7 steps 10-11), so a hundred products going critical in one
+run still degrades to a digest rather than a hundred separate mails.
+
+**After the bypass fires**, the finding is in the `active` state like any other
+and every subsequent observation is gated normally: `clear_after_observations` to
+resolve, `significance.delta_pct` to re-escalate, cooldown between any further
+sends. The bypass is a one-time door, not a standing exemption for the finding.
+
+`notify_policy` gains a knob to disable this per workflow, for authors who
+intentionally want even critical findings to sit behind cooldown:
+
+```json
+"critical_bypass": {
+  "enabled": true,
+  "severity_tier": "critical",
+  "bypasses": ["for_observations", "flap", "cooldown", "quiet_hours"]
+}
+```
+
+Default `enabled: true` — matching decision #4 (backward compatible, opt-out
+rather than opt-in), since silence on a first-observation critical is the worse
+failure mode.
+
 ## 7. Suppression Pipeline
 
 Evaluated in this order per candidate notification. Order matters: human intent
@@ -286,14 +341,19 @@ notifications rather than suppressed ones.
    the existing branding precedence in `server/lib/emailBranding.js`.
 4. **Transition gate** — does the transition map to a notification at all (§6.3)?
 5. **Human overrides** — `muted` drops; `snoozed` holds until `snoozedUntil`;
-   `acked` suppresses reminders but allows escalation.
-6. **Flap demotion** — route to digest instead of immediate.
+   `acked` suppresses reminders but allows escalation. Applies even to a critical
+   bypass candidate (§6.6) — a human suppression always outranks severity.
+6. **Flap demotion** — route to digest instead of immediate. Skipped for a
+   critical bypass candidate (§6.6).
 7. **Cooldown** — `min_interval` since `lastNotifiedAt` for this episode, and
-   `AlertShadow.cooldownMinutes` when present, taking the larger value.
+   `AlertShadow.cooldownMinutes` when present, taking the larger value. Skipped
+   for a critical bypass candidate (§6.6), matching the old alert-engine's
+   `NORMAL → CRITICAL` cooldown bypass.
 8. **Significance** — compare against `currentEpisode.lastNotifiedMetrics`;
    suppress if the change is within `significance.delta_pct`.
 9. **Quiet hours** — evaluated in `context.meta.timezone`, holding non-critical
-   mail until the window opens. Critical severity bypasses.
+   mail until the window opens. Critical severity bypasses, including a critical
+   bypass candidate (§6.6).
 10. **Burst cap** — per run and scope, send the top `burst_cap.max_immediate`
     ranked by the existing evidence score (`computeEvidenceScore`,
     `server/lib/insightUtils.js:7`); the remainder rolls into one overflow digest

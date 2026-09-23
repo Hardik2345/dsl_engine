@@ -21,7 +21,9 @@ test('reruns retain inputs but clear all derived analysis state', () => {
     breakdowns: { bottom_utm_sources: [{ display_value: 'old source' }] },
     rootCausePath: [{ dimension: 'utm_source', value: 'old source' }],
     scratch: { finalInsight: { summary: 'old insight' } },
-    executionTrace: [{ nodeId: 'old_node' }]
+    executionTrace: [{ nodeId: 'old_node' }],
+    alertStates: { transitions: [{ stateKey: 'old', transition: 'new' }] },
+    notifications: [{ intentId: 'old' }]
   }, 'Asia/Kolkata');
 
   assert.deepEqual(rerun.filters, [{ dimension: 'utm_source', operator: '=', value: 'google' }]);
@@ -31,6 +33,8 @@ test('reruns retain inputs but clear all derived analysis state', () => {
   assert.deepEqual(rerun.scratch, {});
   assert.deepEqual(rerun.executionTrace, []);
   assert.equal(rerun.meta.emailBranding, undefined);
+  assert.deepEqual(rerun.alertStates, {});
+  assert.deepEqual(rerun.notifications, []);
 });
 
 test('a later breakdown output replaces an earlier result with the same key', () => {

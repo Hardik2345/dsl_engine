@@ -66,6 +66,10 @@ export default function RunWorkflowModal({ workflow, onClose }) {
 
   const [usePreviousPeriod, setUsePreviousPeriod] = useState(false);
   const [previousBaselineDates, setPreviousBaselineDates] = useState(null);
+  // Defaults to dry-run, matching the backend's own default posture for manual runs
+  // (design §10.2) -- debugging a workflow should never silently notify or burn a
+  // real cooldown unless explicitly opted into.
+  const [liveNotifications, setLiveNotifications] = useState(false);
 
   useEffect(() => {
     const now = new Date();
@@ -161,7 +165,11 @@ export default function RunWorkflowModal({ workflow, onClose }) {
     };
 
     try {
-      const result = await executeWorkflow.mutateAsync({ context });
+      // liveNotifications is a body field read by server/routes/runs.js directly
+      // off req.body -- unrelated to the `mode` query param useExecuteWorkflow also
+      // supports (that one controls sync-vs-async execution, not notifications).
+      // Do not conflate the two.
+      const result = await executeWorkflow.mutateAsync({ context, liveNotifications });
       toast.success(`Workflow run started: ${result.runId}`);
       onClose();
       navigate(`/workflows/${workflow.workflowId}/runs/${result.runId}`);
@@ -240,6 +248,20 @@ export default function RunWorkflowModal({ workflow, onClose }) {
               />
               <label htmlFor="usePreviousPeriod" className="text-sm font-medium text-gray-700 cursor-pointer">
                 Select Previous Period for Baseline
+              </label>
+            </div>
+
+            {/* Live Notifications Checkbox */}
+            <div className="flex items-center gap-2 py-1">
+              <input
+                type="checkbox"
+                id="liveNotifications"
+                checked={liveNotifications}
+                onChange={(e) => setLiveNotifications(e.target.checked)}
+                className="w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
+              />
+              <label htmlFor="liveNotifications" className="text-sm font-medium text-gray-700 cursor-pointer">
+                Send notifications for real (default: dry run)
               </label>
             </div>
 

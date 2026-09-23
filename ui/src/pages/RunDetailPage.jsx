@@ -1,7 +1,7 @@
 import { useParams, Link } from 'react-router-dom';
 import { ArrowLeft, Clock, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
 import { format } from 'date-fns';
-import { useRun } from '../api/hooks';
+import { useRun, useNotifications } from '../api/hooks';
 import { Badge, Card, CardHeader, CardContent, CardTitle, PageSpinner } from '../components/ui';
 import InsightDetail from '../components/InsightDetail';
 import { useState } from 'react';
@@ -10,6 +10,10 @@ export default function RunDetailPage() {
   const { workflowId, runId } = useParams();
   const { data: run, isLoading, error } = useRun(workflowId, runId);
   const [expandedNodes, setExpandedNodes] = useState({});
+  // A genuinely different, more informative data source than the embedded
+  // run.context.scratch.finalInsightEmail block below (has suppressedReason) --
+  // gated on run._id existing so it doesn't fire before the run has loaded.
+  const { data: notifications } = useNotifications(run?._id ? { runId: run._id } : {});
 
   if (isLoading) return <PageSpinner />;
 
@@ -330,6 +334,40 @@ export default function RunDetailPage() {
                     </div>
                   ))}
                 </dl>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Notifications (Phase 4) -- ledger-backed, distinct from the embedded
+              finalInsightEmail block below: this shows every send/suppress decision
+              with its reason, not just the legacy insight-node email status. */}
+          {notifications?.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Notifications ({notifications.length})</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {notifications.map((n) => (
+                    <div key={n._id} className="p-3 bg-gray-50 rounded-lg border border-gray-200 text-sm">
+                      <div className="flex items-center justify-between">
+                        <span className={`font-semibold ${
+                          n.status === 'sent' ? 'text-green-700'
+                            : n.status === 'pending' ? 'text-amber-700'
+                            : n.status === 'failed' ? 'text-red-700'
+                            : 'text-gray-600'
+                        }`}>
+                          {n.status}
+                        </span>
+                        {n.transition && <span className="text-xs text-gray-500">{n.transition}</span>}
+                      </div>
+                      {n.subject && <div className="text-xs text-gray-700 mt-1 break-words">{n.subject}</div>}
+                      {n.suppressedReason && (
+                        <div className="text-xs text-amber-700 mt-1">Reason: {n.suppressedReason}</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </CardContent>
             </Card>
           )}

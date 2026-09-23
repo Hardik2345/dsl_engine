@@ -41,6 +41,17 @@ function mergeContext(context, delta = {}) {
     });
   }
 
+  // 7. Alert-state findings, same last-writer-per-key rule as breakdowns (rule 6).
+  if (delta.alertStates) {
+    context.alertStates = delta.alertStates;
+  }
+
+  // 8. Notification intents accumulate across the whole run.
+  if (Array.isArray(delta.notifications)) {
+    context.notifications = context.notifications || [];
+    context.notifications.push(...delta.notifications);
+  }
+
   return context;
 }
 

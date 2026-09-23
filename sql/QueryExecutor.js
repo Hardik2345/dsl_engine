@@ -31,11 +31,32 @@ function getPool(dbName) {
     decimalNumbers: true,
     waitForConnections: true,
     connectionLimit: 10,
-    queueLimit: 0
+    queueLimit: 0,
+    // Without an explicit bound, a silently-dropped connection (a firewall/VPN
+    // issue rather than an actively refused one) can hang for minutes on some
+    // networks/OSes instead of failing fast with a clear error -- a manual run
+    // then just spins forever with no feedback. 10s is generous for a reachable
+    // DB and short enough that a genuine network problem surfaces quickly.
+    connectTimeout: 10000
   });
 
   pools.set(dbName, pool);
   return pool;
+}
+
+const DEFAULT_QUERY_TIMEOUT_MS = Number(process.env.DB_QUERY_TIMEOUT_MS) || 20000;
+
+// connectTimeout above only bounds the TCP handshake phase. A connection that
+// succeeds but then hangs mid-query (a frozen socket, a silently-dropped packet
+// after the handshake, a lock wait) has no bound at all otherwise -- this race
+// guarantees execute() always settles, so a manual run in the UI fails with a
+// clear error instead of spinning forever regardless of where the hang occurs.
+function withTimeout(promise, ms, message) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 module.exports = {
@@ -52,7 +73,11 @@ module.exports = {
     const pool = getPool(tenantId);
     const params = querySpec.params || [];
 
-    const [rows] = await pool.query(querySpec.sql, params);
+    const [rows] = await withTimeout(
+      pool.query(querySpec.sql, params),
+      DEFAULT_QUERY_TIMEOUT_MS,
+      `QueryExecutor: query timed out after ${DEFAULT_QUERY_TIMEOUT_MS}ms (tenant=${tenantId})`
+    );
     return { rows };
   }
 };

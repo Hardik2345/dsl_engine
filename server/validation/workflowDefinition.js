@@ -6,7 +6,8 @@ const ALLOWED_NODE_TYPES = new Set([
   'composite',
   'workflow_ref',
   'insight',
-  'email'
+  'email',
+  'alert_state'
 ]);
 
 const ALLOWED_DIMENSIONS = new Set([
@@ -30,7 +31,15 @@ const { validateRecipients } = require('../services/emailService');
 const { isSafeBindingPath } = require('../lib/emailBindings');
 const { validateEmailBranding } = require('../lib/emailBranding');
 
-const EMAIL_FORMATS = new Set(['insight', 'report']);
+const EMAIL_FORMATS = new Set(['insight', 'report', 'finding']);
+const NOTIFY_POLICY_FIELDS = new Set([
+  'delivery', 'on', 'min_interval', 'reminder_after', 'significance', 'recurrence_window',
+  'flap', 'burst_cap', 'rate_cap', 'quiet_hours', 'digest', 'stale_after',
+  'respect_upstream_cooldown', 'critical_bypass', 'severity_tier_order'
+]);
+const FLAP_FIELDS = new Set(['window_ms', 'max_episodes']);
+const STATE_SCOPE_FIELDS = new Set(['mode', 'group', 'include_window_mode', 'alertType']);
+const STATE_SCOPE_MODES = new Set(['workflow', 'group', 'tenant_alert_type']);
 const REPORT_PRESETS = new Set(['performance_report_v1']);
 const REPORT_VALUE_FORMATS = new Set(['text', 'integer', 'decimal', 'percent_ratio', 'percent', 'delta_percent']);
 const REPORT_TONES = new Set(['positive', 'negative', 'neutral']);
@@ -62,14 +71,150 @@ function rejectUnknownFields(value, allowedFields, label, errors) {
   });
 }
 
+// design doc §9.2. Kept intentionally shallow (unknown-field rejection plus basic
+// type checks) matching the existing branding-validation style -- deep validation of
+// each sub-object's internal shape is left to the notifier/pipeline, which already
+// has its own defaulting for every field here.
+function validateNotifyPolicy(value, label, errors) {
+  if (value === undefined) return;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    errors.push(`${label} must be an object`);
+    return;
+  }
+  rejectUnknownFields(value, NOTIFY_POLICY_FIELDS, label, errors);
+  if (value.critical_bypass !== undefined) {
+    if (!value.critical_bypass || typeof value.critical_bypass !== 'object' || Array.isArray(value.critical_bypass)) {
+      errors.push(`${label}.critical_bypass must be an object`);
+    } else if (value.critical_bypass.enabled !== undefined && typeof value.critical_bypass.enabled !== 'boolean') {
+      errors.push(`${label}.critical_bypass.enabled must be boolean`);
+    }
+  }
+  // Phase 4: flap.window_ms/max_episodes and stale_after were already accepted
+  // keys (server/lib/alertTransition.js and notificationService.js consume them)
+  // but never structurally validated until now.
+  if (value.flap !== undefined) {
+    if (!value.flap || typeof value.flap !== 'object' || Array.isArray(value.flap)) {
+      errors.push(`${label}.flap must be an object`);
+    } else {
+      rejectUnknownFields(value.flap, FLAP_FIELDS, `${label}.flap`, errors);
+      if (value.flap.window_ms !== undefined && !(Number.isFinite(value.flap.window_ms) && value.flap.window_ms > 0)) {
+        errors.push(`${label}.flap.window_ms must be a positive number`);
+      }
+      if (value.flap.max_episodes !== undefined && !(Number.isInteger(value.flap.max_episodes) && value.flap.max_episodes > 0)) {
+        errors.push(`${label}.flap.max_episodes must be a positive integer`);
+      }
+    }
+  }
+  if (value.stale_after !== undefined && !(Number.isFinite(value.stale_after) && value.stale_after > 0)) {
+    errors.push(`${label}.stale_after must be a positive number of milliseconds`);
+  }
+  if (value.severity_tier_order !== undefined) {
+    if (!Array.isArray(value.severity_tier_order) || value.severity_tier_order.some((tier) => typeof tier !== 'string' || !tier.trim())) {
+      errors.push(`${label}.severity_tier_order must be an array of non-empty strings`);
+    }
+  }
+}
+
+function validateStateScope(value, label, errors) {
+  if (value === undefined) return;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    errors.push(`${label} must be an object`);
+    return;
+  }
+  rejectUnknownFields(value, STATE_SCOPE_FIELDS, label, errors);
+  if (value.mode !== undefined && !STATE_SCOPE_MODES.has(value.mode)) {
+    errors.push(`${label}.mode must be one of workflow|group|tenant_alert_type`);
+  }
+  if (value.mode === 'group' && (typeof value.group !== 'string' || value.group.trim() === '')) {
+    errors.push(`${label} requires group when mode is group`);
+  }
+}
+
+function validateAlertStateNode(node, errors) {
+  const prefix = `alert_state node ${node.id}`;
+
+  if (!Array.isArray(node.sources) || node.sources.length === 0) {
+    errors.push(`${prefix} must include a non-empty sources array`);
+  } else {
+    node.sources.forEach((source, index) => {
+      const label = `${prefix} source ${index + 1}`;
+      if (!source || typeof source !== 'object' || Array.isArray(source)) {
+        errors.push(`${label} must be an object`);
+        return;
+      }
+      if (typeof source.output_key !== 'string' || source.output_key.trim() === '') {
+        errors.push(`${label} requires output_key`);
+      }
+      if (source.direction !== undefined && !['drop', 'increase'].includes(source.direction)) {
+        errors.push(`${label} direction must be drop or increase`);
+      }
+    });
+  }
+
+  validateStateScope(node.state_scope, `${prefix} state_scope`, errors);
+
+  if (!node.breach || typeof node.breach !== 'object' || Array.isArray(node.breach)) {
+    errors.push(`${prefix} must include a breach object`);
+  } else {
+    ['enter', 'exit'].forEach((key) => {
+      const conditions = node.breach[key];
+      if (!Array.isArray(conditions) || conditions.length === 0) {
+        errors.push(`${prefix} breach.${key} must be a non-empty array`);
+        return;
+      }
+      conditions.forEach((condition) => {
+        if (!condition || !ALLOWED_OPS.has(condition.op)) {
+          errors.push(`${prefix} breach.${key} has invalid op ${condition?.op}`);
+        }
+        if (!condition || typeof condition.metric !== 'string' || condition.metric.trim() === '') {
+          errors.push(`${prefix} breach.${key} condition requires metric`);
+        }
+      });
+    });
+  }
+
+  if (node.severity_tiers !== undefined) {
+    if (!Array.isArray(node.severity_tiers)) {
+      errors.push(`${prefix} severity_tiers must be an array`);
+    } else {
+      node.severity_tiers.forEach((tier, index) => {
+        const label = `${prefix} severity_tiers ${index + 1}`;
+        if (!tier || typeof tier.name !== 'string' || tier.name.trim() === '') {
+          errors.push(`${label} requires name`);
+        }
+        if (!Array.isArray(tier?.when) || tier.when.length === 0) {
+          errors.push(`${label} requires a non-empty when array`);
+        }
+      });
+    }
+  }
+
+  validateNotifyPolicy(node.notify_policy, `${prefix} notify_policy`, errors);
+
+  if (node.emit_to !== undefined && !Array.isArray(node.emit_to)) {
+    errors.push(`${prefix} emit_to must be an array of node ids`);
+  }
+}
+
 function validateEmailNode(node, errors) {
   const prefix = `email node ${node.id}`;
-  if (!EMAIL_FORMATS.has(node.format)) errors.push(`${prefix} format must be insight or report`);
+  if (!EMAIL_FORMATS.has(node.format)) errors.push(`${prefix} format must be insight, report or finding`);
   if (typeof node.subject !== 'string' || node.subject.trim() === '') errors.push(`${prefix} subject is required`);
   validateBindingTemplate(node.subject, `${prefix} subject`, errors);
   const recipients = validateRecipients(node.to);
   if (!recipients.ok) errors.push(`${prefix} recipients invalid: ${recipients.error}`);
   errors.push(...validateEmailBranding(node.branding, `${prefix} branding`));
+  validateNotifyPolicy(node.notify_policy, `${prefix} notify_policy`, errors);
+
+  if (node.format === 'finding') {
+    if (typeof node.for_each !== 'string' || node.for_each.trim() === '') {
+      errors.push(`${prefix} format finding requires for_each`);
+    }
+    return;
+  }
+  if (node.for_each !== undefined) {
+    validateBindingPath(node.for_each, `${prefix} for_each`, errors);
+  }
 
   if (!node.template || typeof node.template !== 'object' || Array.isArray(node.template)) {
     errors.push(`${prefix} template must be an object`);
@@ -198,6 +343,16 @@ function validateWorkflowDefinition(definition) {
     errors.push('workflow_type must be root_cause_analysis');
   }
 
+  // "Send Daily Insight" toggle: marks a workflow as a plain scheduled report
+  // rather than a condition-based alert. Read by workflowExecutionService.js to
+  // skip the finding/state-machine treatment entirely for its runs, and by
+  // emailService.js to skip the 24h content cooldown -- a report must go out
+  // every scheduled run even if the numbers happen to repeat, e.g. a quiet
+  // weekend with zero orders two days running.
+  if (definition.always_send !== undefined && typeof definition.always_send !== 'boolean') {
+    errors.push('always_send must be boolean');
+  }
+
   if (!Array.isArray(definition.nodes) || definition.nodes.length === 0) {
     errors.push('nodes must be a non-empty array');
     return { ok: false, errors };
@@ -226,6 +381,7 @@ function validateWorkflowDefinition(definition) {
   }
 
   const nodeIds = new Set();
+  const nodeTypeById = new Map();
   for (const node of definition.nodes) {
     if (!node?.id || typeof node.id !== 'string') {
       errors.push('each node must have an id');
@@ -240,6 +396,7 @@ function validateWorkflowDefinition(definition) {
       errors.push(`unsupported node type: ${node.type}`);
       continue;
     }
+    nodeTypeById.set(node.id, node.type);
 
     if (node.type === 'validation') {
       if (!Array.isArray(node.checks) || node.checks.length === 0) {
@@ -390,6 +547,10 @@ function validateWorkflowDefinition(definition) {
       }
     }
 
+    if (node.type === 'alert_state') {
+      validateAlertStateNode(node, errors);
+    }
+
     if (node.type === 'workflow_ref') {
       if (!node.ref || typeof node.ref !== 'object') {
         errors.push(`workflow_ref node ${node.id} must include ref`);
@@ -431,6 +592,7 @@ function validateWorkflowDefinition(definition) {
       ) {
         errors.push(`insight node ${node.id} has invalid output_key`);
       }
+      validateNotifyPolicy(node.notify_policy, `insight node ${node.id} notify_policy`, errors);
       if (node.email !== undefined) {
         if (!node.email || typeof node.email !== 'object' || Array.isArray(node.email)) {
           errors.push(`insight node ${node.id} email must be an object`);
@@ -463,6 +625,19 @@ function validateWorkflowDefinition(definition) {
     if (node.type === 'email') {
       validateEmailNode(node, errors);
     }
+  }
+
+  // design §11.2: CompositeNode never reads a step's own `next`/routing output
+  // regardless of node type, so an alert_state step could compute transitions but
+  // could never route via then/then_no_changes. Flatly rejected rather than allowed
+  // to silently no-op.
+  for (const node of definition.nodes) {
+    if (node.type !== 'composite' || !Array.isArray(node.steps)) continue;
+    node.steps.forEach((stepId) => {
+      if (nodeTypeById.get(stepId) === 'alert_state') {
+        errors.push(`composite node ${node.id} cannot include alert_state step ${stepId}: its transitions could never route via then/then_no_changes inside a composite`);
+      }
+    });
   }
 
   errors.push(...getPartialDayProductCompatibilityErrors(definition));

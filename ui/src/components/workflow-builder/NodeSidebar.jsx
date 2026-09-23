@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlertCircle, GitFork, BarChart3, Lightbulb, SplitSquareVertical, Layers, Mail } from 'lucide-react';
+import { AlertCircle, GitFork, BarChart3, Lightbulb, SplitSquareVertical, Layers, Mail, Activity } from 'lucide-react';
 
 const SidebarItem = ({ type, label, icon: Icon, colorClass, onDragStart }) => (
   <div
@@ -78,6 +78,14 @@ export default function NodeSidebar() {
             label="Email"
             icon={Mail}
             colorClass="border-cyan-200 text-cyan-700"
+            onDragStart={onDragStart}
+        />
+
+        <SidebarItem
+            type="alert_state"
+            label="Alert State"
+            icon={Activity}
+            colorClass="border-rose-200 text-rose-700"
             onDragStart={onDragStart}
         />
       </div>

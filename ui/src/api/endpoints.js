@@ -271,3 +271,54 @@ export const insightApi = {
     return data.insights;
   },
 };
+
+// Finding APIs (state-based alerting, Phase 4)
+export const findingApi = {
+  list: async (tenantId, filters = {}) => {
+    const { data } = await api.get(`/tenants/${tenantId}/findings`, { params: filters });
+    return data.findings;
+  },
+
+  get: async (tenantId, stateKey) => {
+    const { data } = await api.get(`/tenants/${tenantId}/findings/${encodeURIComponent(stateKey)}`);
+    return data;
+  },
+
+  ack: async (tenantId, stateKey, body = {}) => {
+    const { data } = await api.post(`/tenants/${tenantId}/findings/${encodeURIComponent(stateKey)}/ack`, body);
+    return data.finding;
+  },
+
+  snooze: async (tenantId, stateKey, body = {}) => {
+    const { data } = await api.post(`/tenants/${tenantId}/findings/${encodeURIComponent(stateKey)}/snooze`, body);
+    return data.finding;
+  },
+
+  mute: async (tenantId, stateKey, body = {}) => {
+    const { data } = await api.post(`/tenants/${tenantId}/findings/${encodeURIComponent(stateKey)}/mute`, body);
+    return data.finding;
+  },
+
+  unmute: async (tenantId, stateKey) => {
+    const { data } = await api.post(`/tenants/${tenantId}/findings/${encodeURIComponent(stateKey)}/unmute`);
+    return data.finding;
+  },
+
+  resolve: async (tenantId, stateKey) => {
+    const { data } = await api.post(`/tenants/${tenantId}/findings/${encodeURIComponent(stateKey)}/resolve`);
+    return data.finding;
+  },
+};
+
+// Notification ledger APIs (Phase 4)
+export const notificationApi = {
+  list: async (tenantId, filters = {}) => {
+    const { data } = await api.get(`/tenants/${tenantId}/notifications`, { params: filters });
+    return data.notifications;
+  },
+
+  get: async (tenantId, id) => {
+    const { data } = await api.get(`/tenants/${tenantId}/notifications/${id}`);
+    return data.notification;
+  },
+};

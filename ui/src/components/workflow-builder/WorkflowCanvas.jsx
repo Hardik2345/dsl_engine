@@ -9,6 +9,7 @@ import { InsightNode } from './nodes/InsightNode';
 import { CompositeNode } from './nodes/CompositeNode';
 import { WorkflowRefNode } from './nodes/WorkflowRefNode';
 import { EmailNode } from './nodes/EmailNode';
+import { AlertStateNode } from './nodes/AlertStateNode';
 import DeletableEdge from './edges/DeletableEdge';
 
 const nodeTypes = {
@@ -19,6 +20,7 @@ const nodeTypes = {
   composite: CompositeNode,
   workflow_ref: WorkflowRefNode,
   email: EmailNode,
+  alert_state: AlertStateNode,
 };
 
 const edgeTypes = {
@@ -82,6 +84,14 @@ export default function WorkflowCanvas({
               subject: '{{meta.brandName}}: Insight',
               template: { insightSource: 'scratch.finalInsight' },
               on_fail: { action: 'terminate', reason: 'Email could not be sent' }
+            } : {}),
+            ...(type === 'alert_state' ? {
+              type: 'alert_state',
+              sources: [],
+              state_scope: { mode: 'workflow' },
+              breach: { enter: [], exit: [] },
+              severity_tiers: [],
+              notify_policy: {},
             } : {})
         },
       };

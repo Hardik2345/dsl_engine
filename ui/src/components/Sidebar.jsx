@@ -1,9 +1,10 @@
 import { NavLink } from 'react-router-dom';
-import { 
-  LayoutDashboard, 
-  GitBranch, 
-  Play, 
+import {
+  LayoutDashboard,
+  GitBranch,
+  Play,
   Lightbulb,
+  AlertTriangle,
   Settings,
   LogOut
 } from 'lucide-react';
@@ -14,6 +15,7 @@ const navItems = [
   { to: '/workflows', icon: GitBranch, label: 'Workflows' },
   { to: '/runs', icon: Play, label: 'Runs' },
   { to: '/insights', icon: Lightbulb, label: 'Insights' },
+  { to: '/findings', icon: AlertTriangle, label: 'Findings' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ];
 

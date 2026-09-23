@@ -6,7 +6,9 @@ import {
   insightApi,
   scheduleApi,
   schedulerApi,
-  triggerApi
+  triggerApi,
+  findingApi,
+  notificationApi
 } from './endpoints';
 import { useTenant } from '../context/TenantContext';
 
@@ -411,5 +413,68 @@ export function useInsights() {
   return useQuery({
     queryKey: ['insights', tenantId],
     queryFn: () => insightApi.list(tenantId),
+  });
+}
+
+// ============ Finding Hooks (Phase 4) ============
+
+export function useFindings(filters = {}) {
+  const { tenantId } = useTenant();
+  return useQuery({
+    queryKey: ['findings', tenantId, filters],
+    queryFn: () => findingApi.list(tenantId, filters),
+  });
+}
+
+export function useFinding(stateKey) {
+  const { tenantId } = useTenant();
+  return useQuery({
+    queryKey: ['finding', tenantId, stateKey],
+    queryFn: () => findingApi.get(tenantId, stateKey),
+    enabled: !!stateKey,
+  });
+}
+
+function useFindingMutation(action) {
+  const { tenantId } = useTenant();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ stateKey, body }) => action(tenantId, stateKey, body),
+    onSuccess: (_, { stateKey }) => {
+      queryClient.invalidateQueries({ queryKey: ['findings', tenantId] });
+      queryClient.invalidateQueries({ queryKey: ['finding', tenantId, stateKey] });
+    },
+  });
+}
+
+export function useAckFinding() {
+  return useFindingMutation(findingApi.ack);
+}
+
+export function useSnoozeFinding() {
+  return useFindingMutation(findingApi.snooze);
+}
+
+export function useMuteFinding() {
+  return useFindingMutation(findingApi.mute);
+}
+
+export function useUnmuteFinding() {
+  return useFindingMutation((tenantId, stateKey) => findingApi.unmute(tenantId, stateKey));
+}
+
+export function useResolveFinding() {
+  return useFindingMutation((tenantId, stateKey) => findingApi.resolve(tenantId, stateKey));
+}
+
+// ============ Notification Ledger Hooks (Phase 4) ============
+
+export function useNotifications(filters = {}) {
+  const { tenantId } = useTenant();
+  return useQuery({
+    queryKey: ['notifications', tenantId, filters],
+    queryFn: () => notificationApi.list(tenantId, filters),
+    enabled: Object.values(filters).some(Boolean),
   });
 }

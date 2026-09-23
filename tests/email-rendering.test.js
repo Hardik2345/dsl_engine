@@ -166,6 +166,16 @@ test('delivery failures use existing workflow on_fail termination', async () => 
   assert.equal(result.reason, 'Report email could not be sent');
 });
 
+test('a cooldown-skipped delivery still passes the node rather than failing the run', async () => {
+  const ctx = context({ scratch: { finalInsight: { summary: 'Ready', details: [] } } });
+  const result = await EmailNode({
+    id: 'mail', type: 'email', format: 'insight', to: ['ops@example.com'], subject: 'Report',
+    template: { insightSource: 'scratch.finalInsight' }
+  }, ctx, { emailSender: async () => ({ status: 'skipped', reason: 'cooldown' }) });
+  assert.equal(result.status, 'pass');
+  assert.equal(result.delivery.reason, 'cooldown');
+});
+
 test('thrown sender errors are converted to node failures', async () => {
   const ctx = context({ scratch: { finalInsight: { summary: 'Ready', details: [] } } });
   const result = await EmailNode({

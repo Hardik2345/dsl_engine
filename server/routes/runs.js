@@ -15,7 +15,7 @@ const router = express.Router({ mergeParams: true });
 router.post('/:workflowId/runs', async (req, res, next) => {
   try {
     const { tenantId, workflowId } = req.params;
-    const { version, context, rerun } = req.body || {};
+    const { version, context, rerun, liveNotifications } = req.body || {};
     const mode = req.query.mode === 'async' ? 'async' : 'sync';
     const tenant = await Tenant.findOne({ tenantId }).lean();
     if (!tenant) return res.status(404).json({ error: 'tenant not found' });
@@ -30,7 +30,11 @@ router.post('/:workflowId/runs', async (req, res, next) => {
       meta: {
         ...(context?.meta || {}),
         tenantId,
-        timezone: effectiveTimezone
+        timezone: effectiveTimezone,
+        // Design doc §10.2: manual and rerun invocations default to dry_run so
+        // debugging a workflow never silently resolves live findings or burns real
+        // cooldowns. An explicit opt-in is required to send for real from this route.
+        notifications: { mode: liveNotifications === true ? 'live' : 'dry_run' }
       }
     };
     const effectiveContext = rerun

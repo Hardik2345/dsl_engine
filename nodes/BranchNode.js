@@ -168,6 +168,12 @@ async function BranchNode(def, context) {
 }
 
 module.exports = BranchNode;
+// Exposed as static properties (BranchNode remains the callable default export used
+// by the node registries) so AlertStateNode can reuse the exact same metric
+// resolution and comparison semantics for breach/severity conditions, per
+// docs/state-based-alerting-design.md §9.1.
+module.exports.resolveEntryMetric = resolveEntryMetric;
+module.exports.evaluate = evaluate;
 
 function filterBreakdownEntries(config, breakdowns = {}) {
   const {

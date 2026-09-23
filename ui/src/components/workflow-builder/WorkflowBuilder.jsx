@@ -356,6 +356,15 @@ function WorkflowBuilderContent({
               onChange={(e) => setMetadata((m) => ({ ...m, description: e.target.value }))}
               placeholder="Description"
             />
+            <label className="mt-1 flex items-center gap-1.5 px-2 text-xs text-gray-600 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={Boolean(metadata.always_send)}
+                onChange={(e) => setMetadata((m) => ({ ...m, always_send: e.target.checked }))}
+                className="w-3.5 h-3.5"
+              />
+              Send Daily Insight (always send this report, skip spam suppression)
+            </label>
           </div>
         </div>
 

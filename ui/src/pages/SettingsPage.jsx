@@ -24,6 +24,7 @@ export default function SettingsPage() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [timezoneDrafts, setTimezoneDrafts] = useState({});
   const [brandingDrafts, setBrandingDrafts] = useState({});
+  const [notificationDrafts, setNotificationDrafts] = useState({});
 
   const handleDeleteTenant = async (tid) => {
     if (!confirm(`Are you sure you want to deactivate tenant '${tid}'?`)) return;
@@ -86,6 +87,39 @@ export default function SettingsPage() {
       toast.success(`Email branding updated for '${tenant.tenantId}'`);
     } catch (err) {
       toast.error(err.response?.data?.errors?.join(', ') || err.response?.data?.error || 'Failed to update email branding');
+    }
+  };
+
+  const getNotificationDraft = (tenant) => notificationDrafts[tenant.tenantId] || tenant.settings?.notifications || {};
+  const updateNotificationDraft = (tenant, field, value) => {
+    setNotificationDrafts((prev) => ({
+      ...prev,
+      [tenant.tenantId]: { ...getNotificationDraft(tenant), [field]: value }
+    }));
+  };
+  const updateQuietHoursDraft = (tenant, field, value) => {
+    const current = getNotificationDraft(tenant);
+    updateNotificationDraft(tenant, 'quietHours', { ...(current.quietHours || {}), [field]: value });
+  };
+  const handleSaveNotifications = async (tenant) => {
+    try {
+      const draft = getNotificationDraft(tenant);
+      const notifications = {
+        ...(draft.quietHours?.start || draft.quietHours?.end ? { quietHours: {
+          ...(draft.quietHours.start ? { start: draft.quietHours.start } : {}),
+          ...(draft.quietHours.end ? { end: draft.quietHours.end } : {}),
+        } } : {}),
+        ...(draft.maxEmailsPerDay ? { maxEmailsPerDay: Number(draft.maxEmailsPerDay) } : {}),
+        ...(draft.digestHour !== undefined && draft.digestHour !== '' ? { digestHour: Number(draft.digestHour) } : {}),
+        ...(draft.defaultRecipients ? { defaultRecipients: String(draft.defaultRecipients).split(',').map((v) => v.trim()).filter(Boolean) } : {}),
+      };
+      await updateTenant.mutateAsync({
+        tenantId: tenant.tenantId,
+        updates: { settings: { ...(tenant.settings || {}), notifications } }
+      });
+      toast.success(`Notification defaults updated for '${tenant.tenantId}'`);
+    } catch (err) {
+      toast.error(err.response?.data?.errors?.join(', ') || err.response?.data?.error || 'Failed to update notification defaults');
     }
   };
 
@@ -180,6 +214,19 @@ export default function SettingsPage() {
                         </div>
                         <Button size="sm" variant="secondary" className="mt-2" onClick={() => handleSaveBranding(tenant)} loading={updateTenant.isPending}>
                           <Save className="w-4 h-4 mr-1" /> Save Branding
+                        </Button>
+                      </div>
+                      <div className="mt-4 border-t border-gray-200 pt-3">
+                        <div className="text-xs font-semibold text-gray-700 mb-2">Notification Defaults</div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <input className="border rounded px-2 py-1.5 text-xs" placeholder="Quiet hours start (22:00)" value={getNotificationDraft(tenant).quietHours?.start || ''} onChange={(e) => updateQuietHoursDraft(tenant, 'start', e.target.value)} />
+                          <input className="border rounded px-2 py-1.5 text-xs" placeholder="Quiet hours end (07:00)" value={getNotificationDraft(tenant).quietHours?.end || ''} onChange={(e) => updateQuietHoursDraft(tenant, 'end', e.target.value)} />
+                          <input type="number" min="0" className="border rounded px-2 py-1.5 text-xs" placeholder="Max emails/day" value={getNotificationDraft(tenant).maxEmailsPerDay ?? ''} onChange={(e) => updateNotificationDraft(tenant, 'maxEmailsPerDay', e.target.value)} />
+                          <input type="number" min="0" max="23" className="border rounded px-2 py-1.5 text-xs" placeholder="Digest hour (0-23)" value={getNotificationDraft(tenant).digestHour ?? ''} onChange={(e) => updateNotificationDraft(tenant, 'digestHour', e.target.value)} />
+                          <input className="col-span-2 border rounded px-2 py-1.5 text-xs" placeholder="Default recipients (comma-separated)" value={Array.isArray(getNotificationDraft(tenant).defaultRecipients) ? getNotificationDraft(tenant).defaultRecipients.join(', ') : (getNotificationDraft(tenant).defaultRecipients || '')} onChange={(e) => updateNotificationDraft(tenant, 'defaultRecipients', e.target.value)} />
+                        </div>
+                        <Button size="sm" variant="secondary" className="mt-2" onClick={() => handleSaveNotifications(tenant)} loading={updateTenant.isPending}>
+                          <Save className="w-4 h-4 mr-1" /> Save Notification Defaults
                         </Button>
                       </div>
                     </div>
