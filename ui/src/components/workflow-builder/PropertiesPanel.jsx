@@ -410,6 +410,19 @@ function parseEmailRecipients(value) {
     .filter(Boolean);
 }
 
+function formatTelegramRecipients(value) {
+  if (!Array.isArray(value) || !value.length) return '';
+  return value.map((user) => user?.telegramChatId || user?.username || '').filter(Boolean).join(', ');
+}
+
+function parseTelegramRecipients(value) {
+  return String(value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => /^-?\d+$/.test(item) ? { telegramChatId: item } : { username: item.replace(/^@/, '') });
+}
+
 export default function PropertiesPanel({
   selectedNode,
   onChange,
@@ -423,6 +436,7 @@ export default function PropertiesPanel({
   const [data, setData] = useState(selectedNode?.data || {});
   const [ruleWorkflowSelections, setRuleWorkflowSelections] = useState({});
   const [emailRecipientsInput, setEmailRecipientsInput] = useState('');
+  const [telegramRecipientsInput, setTelegramRecipientsInput] = useState('');
   const partialDayProductWarnings = useMemo(
     () => getNodePartialDayProductWarnings(data),
     [data]
@@ -434,6 +448,7 @@ export default function PropertiesPanel({
     setEmailRecipientsInput(formatEmailRecipients(
       selectedNode?.data?.type === 'email' ? selectedNode?.data?.to : selectedNode?.data?.email?.to
     ));
+    setTelegramRecipientsInput(formatTelegramRecipients(selectedNode?.data?.telegram?.users));
   }, [selectedNode?.id]);
 
   const bumpTopTokenVersion = (value) => {
@@ -497,7 +512,8 @@ export default function PropertiesPanel({
 
   const renderContent = () => {
     switch (selectedNode.type) {
-      case 'email': {
+      case 'email':
+      case 'messaging': {
         const reportTemplate = data.template && typeof data.template === 'object'
           ? data.template
           : createDefaultReportTemplate();
@@ -521,6 +537,22 @@ export default function PropertiesPanel({
         };
         return (
           <div className="space-y-4">
+            {selectedNode.type === 'email' && data.type === 'messaging' && (
+              <div className="space-y-2 pb-3 border-b">
+                <div className="text-xs font-semibold text-gray-700">Messaging Channels</div>
+                {['email', 'telegram'].map((channel) => (
+                  <label key={channel} className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(data.channels?.[channel])}
+                      onChange={(e) => handleChange('channels', { ...(data.channels || {}), [channel]: e.target.checked })}
+                      className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                    />
+                    <span className="capitalize">{channel}</span>
+                  </label>
+                ))}
+              </div>
+            )}
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Email Format</label>
               <select
@@ -542,18 +574,71 @@ export default function PropertiesPanel({
               </select>
             </div>
 
+            {selectedNode.type === 'email' && (
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Recipients</label>
               <input
                 value={emailRecipientsInput}
                 onChange={(e) => {
                   setEmailRecipientsInput(e.target.value);
+                  if (data.type === 'messaging') {
+                    handleChange('email', { ...(data.email || {}), to: parseEmailRecipients(e.target.value) });
+                    return;
+                  }
                   handleChange('to', parseEmailRecipients(e.target.value));
                 }}
                 placeholder="ops@example.com, owner@example.com"
                 className="w-full border p-2 rounded text-sm"
               />
             </div>
+            )}
+            {selectedNode.type === 'email' && data.type === 'messaging' && (
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Telegram Users</label>
+                <input
+                  value={telegramRecipientsInput}
+                  onChange={(e) => {
+                    setTelegramRecipientsInput(e.target.value);
+                    handleChange('telegram', { ...(data.telegram || {}), users: parseTelegramRecipients(e.target.value) });
+                  }}
+                  placeholder="username or chat ID, comma separated"
+                  className="w-full border p-2 rounded text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const username = parseTelegramRecipients(telegramRecipientsInput)
+                      .find((user) => user.username)?.username;
+                    if (!username) {
+                      window.alert('Enter a Telegram username first.');
+                      return;
+                    }
+                    try {
+                      const response = await fetch(`/api/telegram/link?username=${encodeURIComponent(username)}`);
+                      const body = await response.json();
+                      if (!response.ok) {
+                        window.alert(body.error || 'Could not create Telegram link.');
+                        return;
+                      }
+                      await navigator.clipboard.writeText(body.url);
+                      window.alert('Telegram link copied. Send it to the recipient.');
+                    } catch (error) {
+                      window.alert(error.message || 'Could not copy the Telegram link.');
+                    }
+                  }}
+                  className="w-full border border-cyan-200 text-cyan-700 p-2 rounded text-sm hover:bg-cyan-50"
+                >
+                  Copy Telegram link
+                </button>
+                <select
+                  value={data.telegram?.severity || 'info'}
+                  onChange={(e) => handleChange('telegram', { ...(data.telegram || {}), severity: e.target.value })}
+                  className="w-full border p-2 rounded text-sm bg-white mt-2"
+                >
+                  {['info', 'warning', 'critical'].map((severity) => <option key={severity}>{severity}</option>)}
+                </select>
+              </div>
+            )}
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Subject</label>
               <input

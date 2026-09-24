@@ -20,6 +20,7 @@ export default function WorkflowRunsPage() {
       const result = await executeWorkflow.mutateAsync({
         context: run.context,
         rerun: true,
+        mode: 'async',
       });
       toast.success(`Workflow rerun started: ${result.runId}`);
       // Explicitly refetch to update the list immediately

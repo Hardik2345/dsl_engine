@@ -6,7 +6,8 @@ const ALLOWED_NODE_TYPES = new Set([
   'composite',
   'workflow_ref',
   'insight',
-  'email'
+  'email',
+  'messaging'
 ]);
 
 const ALLOWED_DIMENSIONS = new Set([
@@ -152,6 +153,42 @@ function validateEmailNode(node, errors) {
   Object.keys(node.template).filter((key) => !allowed.has(key)).forEach((key) => {
     errors.push(`${prefix} report template contains unsupported field ${key}`);
   });
+}
+
+function validateMessagingNode(node, errors) {
+  const prefix = `messaging node ${node.id}`;
+  const channels = node.channels;
+  if (!channels || typeof channels !== 'object' || Array.isArray(channels)) {
+    errors.push(`${prefix} channels must be an object`);
+    return;
+  }
+  if (typeof channels.email !== 'boolean' || typeof channels.telegram !== 'boolean') {
+    errors.push(`${prefix} channels.email and channels.telegram must be booleans`);
+  }
+  if (!channels.email && !channels.telegram) {
+    errors.push(`${prefix} must enable email, telegram, or both`);
+  }
+  if (!EMAIL_FORMATS.has(node.format)) errors.push(`${prefix} format must be insight or report`);
+  if (typeof node.subject !== 'string' || node.subject.trim() === '') errors.push(`${prefix} subject is required`);
+  validateBindingTemplate(node.subject, `${prefix} subject`, errors);
+  if (!node.template || typeof node.template !== 'object' || Array.isArray(node.template)) {
+    errors.push(`${prefix} template must be an object`);
+  }
+
+  if (channels.email) {
+    const recipients = validateRecipients(node.email?.to);
+    if (!recipients.ok) errors.push(`${prefix} email recipients invalid: ${recipients.error}`);
+    errors.push(...validateEmailBranding(node.branding, `${prefix} branding`));
+  }
+  if (channels.telegram) {
+    const users = Array.isArray(node.telegram?.users) ? node.telegram.users : [];
+    if (!users.length || users.some((user) => !user || (!user.username && !user.telegramChatId))) {
+      errors.push(`${prefix} telegram users must contain a username or telegramChatId`);
+    }
+    if (node.telegram?.severity !== undefined && typeof node.telegram.severity !== 'string') {
+      errors.push(`${prefix} telegram severity must be a string`);
+    }
+  }
 }
 
 function validateInsightDetailItem(detail, nodeId, errors, index) {
@@ -462,6 +499,9 @@ function validateWorkflowDefinition(definition) {
 
     if (node.type === 'email') {
       validateEmailNode(node, errors);
+    }
+    if (node.type === 'messaging') {
+      validateMessagingNode(node, errors);
     }
   }
 
