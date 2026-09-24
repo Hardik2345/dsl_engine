@@ -8,6 +8,7 @@ const branchNode = require('../nodes/BranchNode');
 const insightNode = require('../nodes/InsightNode');
 const workflowRefNode = require('../nodes/WorkflowRefNode');
 const emailNode = require('../nodes/EmailNode');
+const messagingNode = require('../nodes/MessagingNode');
 
 const NodeRegistry = {
   validation: validationNode,
@@ -17,7 +18,8 @@ const NodeRegistry = {
   branch: branchNode,
   workflow_ref: workflowRefNode,
   insight: insightNode,
-  email: emailNode
+  email: emailNode,
+  messaging: messagingNode
 };
 
 const DEFAULT_MAX_EXECUTION_STEPS = 100;
@@ -123,7 +125,7 @@ class WorkflowRunner {
         ? await executor(nodeDef, context, { nodeMap, runtime })
         : nodeDef.type === 'workflow_ref'
           ? await executor(nodeDef, context, runtime)
-          : nodeDef.type === 'email' || nodeDef.type === 'insight'
+          : nodeDef.type === 'email' || nodeDef.type === 'insight' || nodeDef.type === 'messaging'
             ? await executor(nodeDef, context, runtime)
           : await executor(nodeDef, context);
 
@@ -184,6 +186,7 @@ class WorkflowRunner {
       nodeMap,
       workflowIdentity,
       emailSender: this.options.emailSender,
+      telegramSender: this.options.telegramSender,
       executeWorkflowReference: async (nodeDef, context) =>
         this.executeWorkflowReference(nodeDef, context, { workflowIdentity, sharedState })
     };

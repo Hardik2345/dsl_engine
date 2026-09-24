@@ -136,13 +136,16 @@ function summarize(evaluation, delivery) {
     finding: evaluation.finding,
     notification: evaluation.notification,
     delivery_status: delivery?.status || evaluation.delivery?.status || 'none',
-    delivery_error: delivery?.error || evaluation.delivery?.error || null
+    delivery_error: delivery?.error || evaluation.delivery?.error || null,
+    telegram_status: delivery?.telegram?.status || evaluation.delivery?.telegram?.status || null,
+    telegram_error: delivery?.telegram?.error || evaluation.delivery?.telegram?.error || null
   };
 }
 
 function createStateEngineService({
   store = createMongoStateStore(),
   sender = (...args) => require('./emailService').sendEmail(...args),
+  telegramSender = (...args) => require('./telegramService').sendTelegram(...args),
   now = () => new Date(),
   maxCasAttempts = DEFAULT_MAX_CAS_ATTEMPTS
 } = {}) {
@@ -221,11 +224,12 @@ function createStateEngineService({
     return false;
   }
 
-  // Spec §29 steps 10-11. At-most-once per execution: the row is claimed
+  // Spec §29 steps 10-11, for every channel the run captured (email and Telegram).
+  // At-most-once per execution: the row is claimed
   // (pending -> sending) before SMTP, and a retry that finds it still `sending`
   // cannot know whether the provider accepted it, so it records `uncertain` and
   // never resends.
-  async function deliver({ evaluation, intents = [], fallbackRecipients = [], workflowName, brandName, branding }) {
+  async function deliver({ evaluation, intents = [], telegramIntents = [], fallbackRecipients = [], workflowName, brandName, branding }) {
     const { tenantId, workflowId, executionId } = evaluation;
     const status = evaluation.delivery?.status;
 
@@ -246,44 +250,101 @@ function createStateEngineService({
     }
 
     const decision = claimed.decision || evaluation.decision;
-    const email = renderStateEmail({ decision, intents, fallbackRecipients, workflowName, brandName, branding });
 
-    let delivery;
+    // Email goes out when the run captured one, or -- when the run captured nothing
+    // at all -- as the built-in fallback. A run whose only notifier is a Telegram-only
+    // messaging node sends Telegram and no email.
+    const emailWanted = intents.length > 0 || telegramIntents.length === 0;
+    const email = emailWanted
+      ? await deliverEmail({ decision, intents, fallbackRecipients, workflowName, brandName, branding })
+      : null;
+    const telegram = telegramIntents.length ? await deliverTelegram(telegramIntents) : null;
+
+    const channels = [email, telegram].filter(Boolean);
+    const sentCount = channels.filter((channel) => channel.status === 'sent').length;
+    const anyDelivered = channels.some((channel) => channel.status === 'sent' || channel.status === 'partial');
+    let overall = 'failed';
+    if (sentCount === channels.length) overall = 'sent';
+    else if (anyDelivered) overall = 'partial';
+
+    const error = channels
+      .filter((channel) => channel.status !== 'sent' && channel.error)
+      .map((channel) => `${channel.channel}: ${channel.error}`)
+      .join('; ') || null;
+
+    // A notification nobody received must not consume the cooldown. If any channel
+    // got through, the alert counts as delivered.
+    const rolledBack = anyDelivered ? false : await rollbackBookkeeping({ tenantId, workflowId, decision });
+
+    await store.updateDelivery(tenantId, workflowId, executionId, {
+      status: overall,
+      to: email?.to || [],
+      subject: email?.subject || telegramIntents[0]?.title || null,
+      messageId: email?.messageId || null,
+      sent_at: anyDelivered ? now() : null,
+      error,
+      rolled_back: rolledBack,
+      ...(telegram ? { telegram: { status: telegram.status, error: telegram.error || null, messages: telegram.count } } : {})
+    });
+
+    return {
+      status: overall,
+      error,
+      rolledBack,
+      to: email?.to || [],
+      subject: email?.subject || null,
+      messageId: email?.messageId || null,
+      email,
+      telegram
+    };
+  }
+
+  async function deliverEmail({ decision, intents, fallbackRecipients, workflowName, brandName, branding }) {
+    const email = renderStateEmail({ decision, intents, fallbackRecipients, workflowName, brandName, branding });
+    const base = { channel: 'email', to: email.to, subject: email.subject };
     if (!email.to.length) {
       // Nothing to send to: no email node ran and none of the workflow's nodes has
       // email turned on (e.g. an insight node with "Email Insight" unticked).
-      delivery = {
+      return {
+        ...base,
         status: 'failed',
         error: 'no recipients: turn on "Email Insight" on an insight node or add an Email node with recipients'
       };
-    } else {
+    }
+    try {
+      const delivery = await sender({ to: email.to, subject: email.subject, html: email.html, text: email.text });
+      return delivery?.status === 'sent'
+        ? { ...base, status: 'sent', messageId: delivery.messageId || null }
+        : { ...base, status: 'failed', error: delivery?.error || 'email delivery failed' };
+    } catch (error) {
+      return { ...base, status: 'failed', error: error.message };
+    }
+  }
+
+  // Sends each Telegram message the run's messaging nodes captured, exactly as
+  // rendered. 'sent' only if every message fully went through.
+  async function deliverTelegram(messages) {
+    const results = [];
+    for (const message of messages) {
       try {
-        delivery = await sender({ to: email.to, subject: email.subject, html: email.html, text: email.text });
+        results.push(await telegramSender(message));
       } catch (error) {
-        delivery = { status: 'failed', error: error.message };
+        results.push({ status: 'failed', error: error.message });
       }
     }
-
-    if (delivery?.status === 'sent') {
-      await store.updateDelivery(tenantId, workflowId, executionId, {
-        status: 'sent', to: email.to, subject: email.subject,
-        messageId: delivery.messageId || null, sent_at: now(), error: null
-      });
-      return { status: 'sent', messageId: delivery.messageId || null, to: email.to, subject: email.subject };
-    }
-
-    const error = delivery?.error || 'email delivery failed';
-    const rolledBack = await rollbackBookkeeping({ tenantId, workflowId, decision });
-    await store.updateDelivery(tenantId, workflowId, executionId, {
-      status: 'failed', to: email.to, subject: email.subject, error, rolled_back: rolledBack
-    });
-    return { status: 'failed', error, rolledBack, to: email.to, subject: email.subject };
+    const sent = results.filter((result) => result?.status === 'sent').length;
+    const delivered = results.some((result) => result?.status === 'sent' || result?.status === 'partial');
+    let status = 'failed';
+    if (sent === results.length) status = 'sent';
+    else if (delivered) status = 'partial';
+    const error = results.find((result) => result?.status !== 'sent')?.error || null;
+    return { channel: 'telegram', status, error: status === 'sent' ? null : (error || 'telegram delivery failed'), count: results.length };
   }
 
   async function processExecution(params) {
-    const { intents, fallbackRecipients, workflowName, brandName, branding, ...applyParams } = params;
+    const { intents, telegramIntents, fallbackRecipients, workflowName, brandName, branding, ...applyParams } = params;
     const { evaluation, replayed } = await applyExecution(applyParams);
-    const delivery = await deliver({ evaluation, intents, fallbackRecipients, workflowName, brandName, branding });
+    const delivery = await deliver({ evaluation, intents, telegramIntents, fallbackRecipients, workflowName, brandName, branding });
     return { evaluation, replayed, delivery, summary: summarize(evaluation, delivery) };
   }
 

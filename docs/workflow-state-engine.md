@@ -32,6 +32,15 @@ emails, but the sends are captured instead of delivered
 workflow rendered them. The engine only decides whether it goes out. If no email
 node ran, it sends a short built-in message.
 
+**Telegram** (messaging nodes with the Telegram channel on) is gated the same way.
+Its messages are captured during the run and sent only when the engine decides to
+notify: same cooldowns, same quiet hours, one decision per run. The delivery is
+recorded as `sent` (every channel got through), `partial` (some did) or `failed`
+(none did), and the cooldown is handed back only when nothing was delivered. A
+Telegram-only messaging node sends no email, not even the built-in message.
+Without alert state (daily insights, or RCA workflows with it off) a messaging node
+sends email and Telegram on every run.
+
 ## 2. Configuration
 
 ```json

@@ -88,15 +88,20 @@ export function getStateConfigErrors(workflowJson = {}) {
     return errors;
   }
 
-  // Mirrors the server: the state engine emails whoever the workflow's own email
-  // nodes and email-enabled insight nodes would have, so it needs at least one.
+  // Mirrors the server (hasNotificationTarget): the state engine notifies whoever the
+  // workflow's own email, email-enabled insight, and messaging nodes would have.
+  const nonEmpty = (list) => Array.isArray(list) && list.length > 0;
   const hasRecipients = (workflowJson.nodes || []).some((node) => {
-    if (node.type === 'email') return Array.isArray(node.to) && node.to.length > 0;
-    if (node.type === 'insight') return node.email?.enabled && Array.isArray(node.email.to) && node.email.to.length > 0;
+    if (node.type === 'email') return nonEmpty(node.to);
+    if (node.type === 'insight') return Boolean(node.email?.enabled) && nonEmpty(node.email.to);
+    if (node.type === 'messaging') {
+      return (Boolean(node.channels?.email) && nonEmpty(node.email?.to))
+        || (Boolean(node.channels?.telegram) && nonEmpty(node.telegram?.users));
+    }
     return false;
   });
   if (!hasRecipients) {
-    errors.push('Alert state needs someone to email: turn on "Email Insight" on an insight node or add an Email node');
+    errors.push('Alert state needs someone to notify: turn on "Email Insight" on an insight node, or add an Email or Messaging node with recipients');
   }
 
   const { normal, critical } = config.thresholds || {};
@@ -144,6 +149,7 @@ export const DELIVERY_LABELS = {
   pending: 'Pending',
   sending: 'Sending',
   sent: 'Sent',
+  partial: 'Partly sent',
   failed: 'Failed',
   uncertain: 'Uncertain',
 };

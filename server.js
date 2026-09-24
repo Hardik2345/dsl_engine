@@ -15,6 +15,7 @@ const scheduleRoutes = require('./server/routes/schedules');
 const triggerRoutes = require('./server/routes/triggers');
 const schedulerRoutes = require('./server/routes/scheduler');
 const alertsIngestRoutes = require('./server/routes/alertsIngest');
+const telegramRoutes = require('./server/routes/telegram');
 
 const app = express();
 app.set('trust proxy', 1);
@@ -68,6 +69,7 @@ app.use('/tenants/:tenantId/insights', insightRoutes);
 app.use('/tenants/:tenantId/triggers', triggerRoutes);
 app.use('/tenants/:tenantId/scheduler', schedulerRoutes);
 app.use('/tenants', alertsIngestRoutes);
+app.use('/telegram', telegramRoutes);
 
 app.use((err, req, res, next) => {
   const status = err.status || 500;

@@ -95,6 +95,11 @@ export function RunStateDecisionCard({ run }) {
               <dd className="font-medium mt-1">
                 {describeNotification(evaluation.notification, evaluation.delivery_status)}
               </dd>
+              {evaluation.telegram_status && (
+                <dd className="text-xs text-gray-500 mt-1">
+                  Telegram: {DELIVERY_LABELS[evaluation.telegram_status] || evaluation.telegram_status}
+                </dd>
+              )}
               {evaluation.delivery_error && (
                 <dd className="text-xs text-red-600 mt-1">{evaluation.delivery_error}</dd>
               )}
@@ -183,6 +188,9 @@ export function WorkflowStateCard({ workflowId, definition }) {
                     <td className="py-2 pr-4">{formatValue(row.finding?.value)}</td>
                     <td className="py-2">
                       {describeNotification(row.notification, row.delivery?.status)}
+                      {row.delivery?.telegram?.status && (
+                        <span className="text-xs text-gray-500"> · Telegram {DELIVERY_LABELS[row.delivery.telegram.status] || row.delivery.telegram.status}</span>
+                      )}
                       {row.delivery?.rolled_back && (
                         <span className="text-xs text-gray-500"> (cooldown restored)</span>
                       )}

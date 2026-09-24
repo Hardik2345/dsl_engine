@@ -2,7 +2,7 @@ const { resolveEmailBranding } = require('./emailBranding');
 const { isLowerWorse } = require('./stateEngine/severity');
 
 // Renders the single email the state engine sends for one execution. The workflow's
-// own email/insight nodes produce the content -- their rendered output is captured
+// own email/insight/messaging nodes produce the content -- their rendered output is captured
 // during the run (server/lib/notificationCapture.js) and sent exactly as rendered:
 // same subject, same body, no state banner or prefix. The state engine only decides
 // *whether* it goes out. Only when no email node ran on the alerting path does this
@@ -88,18 +88,31 @@ function renderStateEmail({ decision, intents = [], fallbackRecipients = [], wor
 }
 
 // Recipients for the built-in fallback email: whatever the workflow itself would
-// have mailed -- every email node's `to` plus every insight node's `email.to`.
+// have mailed -- every email node's `to`, every email-enabled insight node's
+// `email.to`, and every messaging node's `email.to` when its email channel is on.
 function collectWorkflowRecipients(definition = {}) {
   const lists = [];
   for (const node of definition.nodes || []) {
     if (node.type === 'email') lists.push(node.to);
     if (node.type === 'insight' && node.email?.enabled) lists.push(node.email.to);
+    if (node.type === 'messaging' && node.channels?.email) lists.push(node.email?.to);
   }
   return uniqueRecipients(lists);
+}
+
+// Whether the workflow can notify anyone at all: an email recipient anywhere, or a
+// messaging node with Telegram users.
+function hasNotificationTarget(definition = {}) {
+  if (collectWorkflowRecipients(definition).length) return true;
+  return (definition.nodes || []).some((node) => node.type === 'messaging'
+    && node.channels?.telegram
+    && Array.isArray(node.telegram?.users)
+    && node.telegram.users.some((user) => user && (user.username || user.telegramChatId)));
 }
 
 module.exports = {
   renderStateEmail,
   collectWorkflowRecipients,
+  hasNotificationTarget,
   headline
 };

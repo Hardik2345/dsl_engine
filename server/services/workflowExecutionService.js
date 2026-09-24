@@ -34,7 +34,8 @@ async function persistFinalInsight({ tenantId, workflowId, runId, context }) {
   });
 }
 
-// RCA workflows with state_config enabled have their email/insight sends captured
+// RCA workflows with state_config enabled have their email/insight/messaging sends
+// (email and Telegram) captured
 // instead of delivered, so the state engine can decide after the run whether to
 // notify. Everything else -- daily insight/report workflows and RCA workflows not
 // yet configured for state -- sends inline exactly as before.
@@ -45,7 +46,7 @@ function prepareNotificationMode(definition) {
 
 // Never throws: a state-engine problem is recorded on the run but must not fail an
 // otherwise-successful run, since a failed run is retried and re-executed.
-async function applyStateEngine({ run, result, intents, stateEngine = getDefaultStateEngineService() }) {
+async function applyStateEngine({ run, result, intents, telegramIntents = [], stateEngine = getDefaultStateEngineService() }) {
   const definition = run.definitionJson || {};
   const meta = result.context?.meta || {};
   try {
@@ -58,6 +59,7 @@ async function applyStateEngine({ run, result, intents, stateEngine = getDefault
       config: definition.state_config,
       timezone: resolveTenantTimezone(meta.timezone),
       intents,
+      telegramIntents,
       fallbackRecipients: collectWorkflowRecipients(definition),
       workflowName: meta.workflowName || definition.name,
       brandName: meta.brandName,
@@ -100,7 +102,8 @@ async function executeRun({ run, runId }) {
     onNodeResult: payload => nodeOutputs.push(payload),
     workflowResolver: workflowResolverService,
     workflowIdentity: `${targetRun.tenantId}/${targetRun.workflowId}@${targetRun.version}`,
-    emailSender: notificationMode.capture?.sender
+    emailSender: notificationMode.capture?.sender,
+    telegramSender: notificationMode.capture?.telegramSender
   });
 
   const startedAt = targetRun.startedAt || new Date();
@@ -129,7 +132,12 @@ async function executeRun({ run, runId }) {
     });
 
     if (notificationMode.stateEngine) {
-      await applyStateEngine({ run: targetRun, result, intents: notificationMode.capture.intents });
+      await applyStateEngine({
+        run: targetRun,
+        result,
+        intents: notificationMode.capture.intents,
+        telegramIntents: notificationMode.capture.telegramIntents
+      });
     }
 
     const removedRunIds = await pruneWorkflowRuns(

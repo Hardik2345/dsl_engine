@@ -147,7 +147,7 @@ test('validation: workflow_purpose and state_config', () => {
   noEmail.nodes = [
     { ...noEmail.nodes[0], email: { ...noEmail.nodes[0].email, enabled: false }, next: undefined }
   ];
-  assert.ok(validateWorkflowDefinition(noEmail).errors.some((e) => /no node sends email/.test(e)));
+  assert.ok(validateWorkflowDefinition(noEmail).errors.some((e) => /no node sends a notification/.test(e)));
   // A disabled config is not validated beyond its shape.
   assert.equal(validateWorkflowDefinition(definition({ state_config: { enabled: false } })).ok, true);
 });

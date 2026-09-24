@@ -6,7 +6,8 @@ const ALLOWED_NODE_TYPES = new Set([
   'composite',
   'workflow_ref',
   'insight',
-  'email'
+  'email',
+  'messaging'
 ]);
 
 const ALLOWED_DIMENSIONS = new Set([
@@ -30,7 +31,7 @@ const { validateRecipients } = require('../services/emailService');
 const { isSafeBindingPath } = require('../lib/emailBindings');
 const { validateEmailBranding } = require('../lib/emailBranding');
 const { WORKFLOW_PURPOSES } = require('../lib/stateEngine/defaults');
-const { collectWorkflowRecipients } = require('../lib/renderStateEmail');
+const { hasNotificationTarget } = require('../lib/renderStateEmail');
 
 const EMAIL_FORMATS = new Set(['insight', 'report']);
 const REPORT_PRESETS = new Set(['performance_report_v1']);
@@ -73,7 +74,12 @@ function validateEmailNode(node, errors) {
   const recipients = validateRecipients(node.to);
   if (!recipients.ok) errors.push(`${prefix} recipients invalid: ${recipients.error}`);
   errors.push(...validateEmailBranding(node.branding, `${prefix} branding`));
+  validateEmailTemplate(node, prefix, errors);
+}
 
+// Shared by email and messaging nodes: both render through renderEmail, so an
+// insight or report template must pass the same checks whichever node carries it.
+function validateEmailTemplate(node, prefix, errors) {
   if (!node.template || typeof node.template !== 'object' || Array.isArray(node.template)) {
     errors.push(`${prefix} template must be an object`);
     return;
@@ -158,6 +164,42 @@ function validateEmailNode(node, errors) {
   Object.keys(node.template).filter((key) => !allowed.has(key)).forEach((key) => {
     errors.push(`${prefix} report template contains unsupported field ${key}`);
   });
+}
+
+// Telegram integration (ported from my-feature-branch d0fc6f9). A messaging node
+// renders like an email node and delivers to email and/or Telegram.
+function validateMessagingNode(node, errors) {
+  const prefix = `messaging node ${node.id}`;
+  const channels = node.channels;
+  if (!channels || typeof channels !== 'object' || Array.isArray(channels)) {
+    errors.push(`${prefix} channels must be an object`);
+    return;
+  }
+  if (typeof channels.email !== 'boolean' || typeof channels.telegram !== 'boolean') {
+    errors.push(`${prefix} channels.email and channels.telegram must be booleans`);
+  }
+  if (!channels.email && !channels.telegram) {
+    errors.push(`${prefix} must enable email, telegram, or both`);
+  }
+  if (!EMAIL_FORMATS.has(node.format)) errors.push(`${prefix} format must be insight or report`);
+  if (typeof node.subject !== 'string' || node.subject.trim() === '') errors.push(`${prefix} subject is required`);
+  validateBindingTemplate(node.subject, `${prefix} subject`, errors);
+  validateEmailTemplate(node, prefix, errors);
+
+  if (channels.email) {
+    const recipients = validateRecipients(node.email?.to);
+    if (!recipients.ok) errors.push(`${prefix} email recipients invalid: ${recipients.error}`);
+    errors.push(...validateEmailBranding(node.branding, `${prefix} branding`));
+  }
+  if (channels.telegram) {
+    const users = Array.isArray(node.telegram?.users) ? node.telegram.users : [];
+    if (!users.length || users.some((user) => !user || (!user.username && !user.telegramChatId))) {
+      errors.push(`${prefix} telegram users must contain a username or telegramChatId`);
+    }
+    if (node.telegram?.severity !== undefined && typeof node.telegram.severity !== 'string') {
+      errors.push(`${prefix} telegram severity must be a string`);
+    }
+  }
 }
 
 function validateInsightDetailItem(detail, nodeId, errors, index) {
@@ -245,10 +287,11 @@ function validateStateConfig(definition, errors) {
     }
   }
 
-  // The state engine only knows who to notify from the workflow's own email nodes
-  // and email-enabled insight nodes; with none, every alert would fail to send.
-  if (!collectWorkflowRecipients(definition).length) {
-    errors.push('state_config is enabled but no node sends email: turn on "Email Insight" on an insight node or add an Email node with recipients');
+  // The state engine only knows who to notify from the workflow's own email,
+  // email-enabled insight, and messaging (email / Telegram) nodes; with none, every
+  // alert would fail to send.
+  if (!hasNotificationTarget(definition)) {
+    errors.push('state_config is enabled but no node sends a notification: turn on "Email Insight" on an insight node, or add an Email or Messaging node with recipients');
   }
 
   if (config.recovery !== undefined) {
@@ -560,6 +603,9 @@ function validateWorkflowDefinition(definition) {
 
     if (node.type === 'email') {
       validateEmailNode(node, errors);
+    }
+    if (node.type === 'messaging') {
+      validateMessagingNode(node, errors);
     }
   }
 

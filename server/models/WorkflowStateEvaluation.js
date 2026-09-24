@@ -26,7 +26,8 @@ const WorkflowStateEvaluationSchema = new mongoose.Schema(
     delivery: {
       status: {
         type: String,
-        enum: ['none', 'suppressed', 'pending', 'sending', 'sent', 'failed', 'uncertain'],
+        // partial: some channels (email / Telegram) got through and some didn't.
+        enum: ['none', 'suppressed', 'pending', 'sending', 'sent', 'partial', 'failed', 'uncertain'],
         default: 'none'
       },
       to: { type: [String], default: [] },
@@ -34,7 +35,9 @@ const WorkflowStateEvaluationSchema = new mongoose.Schema(
       messageId: { type: String, default: null },
       error: { type: String, default: null },
       sent_at: { type: Date, default: null },
-      rolled_back: { type: Boolean, default: false }
+      rolled_back: { type: Boolean, default: false },
+      // Only present when the run captured Telegram messages.
+      telegram: { type: mongoose.Schema.Types.Mixed, default: undefined }
     },
     expiresAt: { type: Date, default: () => new Date(Date.now() + DEFAULT_TTL_MS) }
   },
