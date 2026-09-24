@@ -29,13 +29,15 @@ const {
 const { validateRecipients } = require('../services/emailService');
 const { isSafeBindingPath } = require('../lib/emailBindings');
 const { validateEmailBranding } = require('../lib/emailBranding');
-const { WORKFLOW_PURPOSES, FINDING_DIRECTIONS, MIN_REQUIRED_EVIDENCE } = require('../lib/stateEngine/defaults');
+const { WORKFLOW_PURPOSES } = require('../lib/stateEngine/defaults');
+const { collectWorkflowRecipients } = require('../lib/renderStateEmail');
 
 const EMAIL_FORMATS = new Set(['insight', 'report']);
 const REPORT_PRESETS = new Set(['performance_report_v1']);
-const REPORT_VALUE_FORMATS = new Set(['text', 'integer', 'decimal', 'percent_ratio', 'percent', 'delta_percent']);
+const REPORT_VALUE_FORMATS = new Set(['text', 'integer', 'decimal', 'percent_ratio', 'percent', 'delta_percent', 'currency']);
 const REPORT_TONES = new Set(['positive', 'negative', 'neutral']);
-const REPORT_ICONS = new Set(['metric', 'sessions', 'orders', 'conversion', 'trend']);
+const REPORT_ICONS = new Set(['metric', 'sessions', 'orders', 'conversion', 'trend', 'sales', 'aov', 'cart']);
+const MAX_REPORT_METRICS = 6;
 
 function validateBindingPath(value, label, errors) {
   if (!isSafeBindingPath(value)) errors.push(`${label} must be a safe dot-separated context path`);
@@ -100,8 +102,8 @@ function validateEmailNode(node, errors) {
   validateBindingPath(node.template.period?.current, `${prefix} template.period.current`, errors);
   validateBindingPath(node.template.period?.comparison, `${prefix} template.period.comparison`, errors);
 
-  if (!Array.isArray(node.template.metrics) || node.template.metrics.length < 1 || node.template.metrics.length > 4) {
-    errors.push(`${prefix} template.metrics must contain one to four items`);
+  if (!Array.isArray(node.template.metrics) || node.template.metrics.length < 1 || node.template.metrics.length > MAX_REPORT_METRICS) {
+    errors.push(`${prefix} template.metrics must contain one to ${MAX_REPORT_METRICS} items`);
   } else {
     node.template.metrics.forEach((metric, index) => {
       const label = `${prefix} metric ${index + 1}`;
@@ -149,7 +151,10 @@ function validateEmailNode(node, errors) {
       rejectUnknownFields(table, new Set(['title', 'source', 'tone', 'limit', 'columns']), label, errors);
     });
   }
-  const allowed = new Set(['preset', 'eyebrow', 'title', 'description', 'period', 'metrics', 'tables']);
+  if (node.template.insightSource !== undefined) {
+    validateBindingPath(node.template.insightSource, `${prefix} template.insightSource`, errors);
+  }
+  const allowed = new Set(['preset', 'eyebrow', 'title', 'description', 'period', 'metrics', 'insightSource', 'tables']);
   Object.keys(node.template).filter((key) => !allowed.has(key)).forEach((key) => {
     errors.push(`${prefix} report template contains unsupported field ${key}`);
   });
@@ -212,7 +217,7 @@ function validateStateConfig(definition, errors) {
   }
   if (config.enabled !== true) return;
 
-  const { finding, thresholds, cooldown, recovery, quiet_hours: quietHours } = config;
+  const { finding, thresholds, cooldown, quiet_hours: quietHours } = config;
 
   if (!finding || typeof finding !== 'object') {
     errors.push('state_config.finding is required');
@@ -220,23 +225,34 @@ function validateStateConfig(definition, errors) {
     if (typeof finding.metric !== 'string' || !METRIC_KEY_RE.test(finding.metric)) {
       errors.push('state_config.finding.metric must be a metric key like cvr_delta_pct');
     }
-    if (!FINDING_DIRECTIONS.includes(finding.direction)) {
-      errors.push(`state_config.finding.direction must be one of ${FINDING_DIRECTIONS.join('|')}`);
+    if (finding.direction !== undefined) {
+      errors.push('state_config.finding.direction is no longer supported; use signed thresholds (e.g. normal -10, critical -20 for a drop)');
     }
   }
 
+  // Thresholds are signed metric values. Which way is worse comes from their order:
+  // critical below normal alerts on drops, critical above normal alerts on rises.
   if (!thresholds || typeof thresholds !== 'object') {
     errors.push('state_config.thresholds is required');
   } else {
     const { normal, critical } = thresholds;
-    if (typeof normal !== 'number' || !Number.isFinite(normal) || normal < 0) {
-      errors.push('state_config.thresholds.normal must be a number >= 0');
+    const normalOk = typeof normal === 'number' && Number.isFinite(normal);
+    const criticalOk = typeof critical === 'number' && Number.isFinite(critical);
+    if (!normalOk) errors.push('state_config.thresholds.normal must be a number');
+    if (!criticalOk) errors.push('state_config.thresholds.critical must be a number');
+    if (normalOk && criticalOk && normal === critical) {
+      errors.push('state_config.thresholds.critical must differ from thresholds.normal');
     }
-    if (typeof critical !== 'number' || !Number.isFinite(critical)) {
-      errors.push('state_config.thresholds.critical must be a number');
-    } else if (typeof normal === 'number' && critical <= normal) {
-      errors.push('state_config.thresholds.critical must be greater than thresholds.normal');
-    }
+  }
+
+  // The state engine only knows who to notify from the workflow's own email nodes
+  // and email-enabled insight nodes; with none, every alert would fail to send.
+  if (!collectWorkflowRecipients(definition).length) {
+    errors.push('state_config is enabled but no node sends email: turn on "Email Insight" on an insight node or add an Email node with recipients');
+  }
+
+  if (config.recovery !== undefined) {
+    errors.push('state_config.recovery is no longer supported; returning to normal does not send an email');
   }
 
   if (cooldown !== undefined) {
@@ -245,11 +261,6 @@ function validateStateConfig(definition, errors) {
         errors.push(`state_config.cooldown.${field} must be a whole number of minutes >= 0`);
       }
     });
-  }
-
-  if (recovery?.required_evidence !== undefined
-    && (!Number.isInteger(recovery.required_evidence) || recovery.required_evidence < MIN_REQUIRED_EVIDENCE)) {
-    errors.push(`state_config.recovery.required_evidence must be a whole number >= ${MIN_REQUIRED_EVIDENCE}`);
   }
 
   if (quietHours !== undefined) {

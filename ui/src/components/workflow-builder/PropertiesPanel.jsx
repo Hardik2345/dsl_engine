@@ -16,6 +16,10 @@ const METRIC_OPTIONS = [
   'atc_sessions'
 ];
 
+// metric_compare can also report store-level sales and AOV (from hour_wise_sales);
+// breakdowns can't rank by them, so they're kept out of METRIC_OPTIONS.
+const COMPARE_METRIC_OPTIONS = [...METRIC_OPTIONS, 'sales', 'aov'];
+
 const RANK_BY_OPTIONS = [
   { value: 'delta', label: 'Delta (default)' },
   { value: 'baseline_cvr', label: 'Baseline CVR' },
@@ -40,14 +44,22 @@ const MIN_SESSIONS_MODE_OPTIONS = [
   { value: 'baseline_only', label: 'Require baseline only' }
 ];
 
+// Spells out how the two floors combine, since "both low" keeps a row that is low
+// in only one window (e.g. 151 now vs 547 before with both floors at 500).
+const MIN_SESSIONS_MODE_HINTS = {
+  both_low: 'Kept unless current AND baseline sessions are both below their minimums.',
+  either_low: 'Kept only if current and baseline sessions both meet their minimums.',
+  baseline_only: 'Only the baseline minimum applies; current sessions are ignored.'
+};
+
 const BREAKDOWN_INPUT_SCOPE_OPTIONS = [
   { value: 'global', label: 'Global' },
   { value: 'breakdown', label: 'From Breakdown' }
 ];
 
-const EMAIL_VALUE_FORMATS = ['text', 'integer', 'decimal', 'percent_ratio', 'percent', 'delta_percent'];
+const EMAIL_VALUE_FORMATS = ['text', 'integer', 'decimal', 'percent_ratio', 'percent', 'delta_percent', 'currency'];
 const EMAIL_TABLE_TONES = ['positive', 'negative', 'neutral'];
-const EMAIL_METRIC_ICONS = ['metric', 'sessions', 'orders', 'conversion', 'trend'];
+const EMAIL_METRIC_ICONS = ['metric', 'sessions', 'orders', 'conversion', 'trend', 'sales', 'aov', 'cart'];
 
 const createDefaultReportTemplate = () => ({
   preset: 'performance_report_v1',
@@ -103,6 +115,8 @@ const BRANCH_METRIC_OPTIONS = [
   'cvr_delta_pct',
   'atc_rate_delta_pct',
   'atc_sessions_delta_pct',
+  'sales_delta_pct',
+  'aov_delta_pct',
   'current_orders',
   'baseline_orders',
   'current_sessions',
@@ -143,7 +157,7 @@ function MetricMultiSelect({ value, onChange, placeholder }) {
   const [isOpen, setIsOpen] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
   const normalizedValue = Array.isArray(value) ? value : [];
-  const available = METRIC_OPTIONS.filter((m) => !normalizedValue.includes(m));
+  const available = COMPARE_METRIC_OPTIONS.filter((m) => !normalizedValue.includes(m));
   const suggestions = inputValue
     ? available.filter((m) => m.startsWith(inputValue.toLowerCase()))
     : available;
@@ -162,7 +176,7 @@ function MetricMultiSelect({ value, onChange, placeholder }) {
     if (e.key === 'Enter' || e.key === ',') {
       e.preventDefault();
       const trimmed = inputValue.trim().toLowerCase();
-      if (METRIC_OPTIONS.includes(trimmed)) {
+      if (COMPARE_METRIC_OPTIONS.includes(trimmed)) {
         addMetric(trimmed);
       }
     }
@@ -241,7 +255,7 @@ function MetricMultiSelect({ value, onChange, placeholder }) {
         )}
       </div>
       <div className="text-[10px] text-gray-400">
-        Supported: {METRIC_OPTIONS.join(', ')}
+        Supported: {COMPARE_METRIC_OPTIONS.join(', ')}
       </div>
     </div>
   );
@@ -454,6 +468,24 @@ export default function PropertiesPanel({
     setData(newData);
     onChange(selectedNode.id, newData);
   };
+  // Current/baseline floors fall back to the legacy stop_conditions.min_sessions on
+  // the server. The first edit writes both floors explicitly and drops the legacy
+  // field, so what the panel shows is exactly what runs.
+  const handleMinSessionsChange = (field, value) => {
+    const next = { ...(data.stop_conditions || {}) };
+    if (next.min_sessions !== undefined) {
+      if (next.min_current_sessions === undefined) next.min_current_sessions = next.min_sessions;
+      if (next.min_baseline_sessions === undefined) next.min_baseline_sessions = next.min_sessions;
+      delete next.min_sessions;
+    }
+    if (value === '' || value === null || value === undefined) {
+      delete next[field];
+    } else {
+      const parsed = parseFloat(value);
+      next[field] = Number.isNaN(parsed) ? value : parsed;
+    }
+    handleChange('stop_conditions', next);
+  };
   const handleStopConditionChange = (field, value, parseFn) => {
     const current = data.stop_conditions || {};
     const next = { ...current };
@@ -576,8 +608,32 @@ export default function PropertiesPanel({
                   <input value={reportTemplate.period?.comparison || ''} onChange={(e) => updateReportTemplate('period', { ...(reportTemplate.period || {}), comparison: e.target.value })} placeholder="Comparison period path" className="w-full border p-2 rounded text-sm font-mono" />
                 </div>
 
+                <div className="space-y-2 pt-3 border-t">
+                  <label className="flex items-center gap-2 text-xs font-semibold text-gray-700">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(reportTemplate.insightSource)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          updateReportTemplate('insightSource', 'scratch.finalInsight');
+                        } else {
+                          const { insightSource, ...rest } = reportTemplate;
+                          handleChange('template', rest);
+                        }
+                      }}
+                    />
+                    Show insight takeaway
+                  </label>
+                  {reportTemplate.insightSource && (
+                    <>
+                      <input value={reportTemplate.insightSource} onChange={(e) => updateReportTemplate('insightSource', e.target.value)} placeholder="scratch.finalInsight" className="w-full border p-2 rounded text-sm font-mono" />
+                      <div className="text-[10px] text-gray-400">Shows the insight node's summary under the metric cards. Place this email after the insight node.</div>
+                    </>
+                  )}
+                </div>
+
                 <div className="space-y-3 pt-3 border-t">
-                  <div className="flex justify-between items-center"><span className="text-xs font-semibold text-gray-700">Metric Cards</span><button type="button" disabled={(reportTemplate.metrics || []).length >= 4} onClick={() => updateReportTemplate('metrics', [...(reportTemplate.metrics || []), { label: 'Metric', value: 'metrics.current_sessions', change: 'metrics.sessions_delta_pct', format: 'integer', icon: 'metric' }])} className="text-xs text-blue-600 disabled:text-gray-300"><Plus className="inline w-3 h-3" /> Add</button></div>
+                  <div className="flex justify-between items-center"><span className="text-xs font-semibold text-gray-700">Metric Cards</span><button type="button" disabled={(reportTemplate.metrics || []).length >= 6} onClick={() => updateReportTemplate('metrics', [...(reportTemplate.metrics || []), { label: 'Metric', value: 'metrics.current_sessions', change: 'metrics.sessions_delta_pct', format: 'integer', icon: 'metric' }])} className="text-xs text-blue-600 disabled:text-gray-300"><Plus className="inline w-3 h-3" /> Add</button></div>
                   {(reportTemplate.metrics || []).map((metric, index) => (
                     <div key={index} className="border rounded p-2 space-y-2 bg-gray-50">
                       <div className="flex gap-2"><input value={metric.label || ''} onChange={(e) => updateMetric(index, 'label', e.target.value)} placeholder="Label" className="min-w-0 flex-1 border p-1 rounded text-xs" /><button type="button" disabled={(reportTemplate.metrics || []).length <= 1} onClick={() => updateReportTemplate('metrics', reportTemplate.metrics.filter((_, idx) => idx !== index))} className="text-red-500 disabled:text-gray-300"><Trash2 className="w-4 h-4" /></button></div>
@@ -1395,6 +1451,9 @@ export default function PropertiesPanel({
                                   <option key={opt.value} value={opt.value}>{opt.label}</option>
                               ))}
                           </select>
+                          <p className="text-[11px] text-gray-400 mt-1">
+                              {MIN_SESSIONS_MODE_HINTS[data.min_sessions_mode || 'both_low']}
+                          </p>
                      </div>
                      <div>
                           <label className="block text-xs font-medium text-gray-500 mb-1">Input Scope</label>
@@ -1466,25 +1525,14 @@ export default function PropertiesPanel({
                                   />
                               </div>
                               <div>
-                                  <label className="block text-[11px] font-medium text-gray-500 mb-1">Min Sessions (default)</label>
-                                  <input
-                                      type="number"
-                                      min="0"
-                                      className="w-full border text-sm p-1 rounded"
-                                      value={data.stop_conditions?.min_sessions ?? ''}
-                                      onChange={(e) => handleStopConditionChange('min_sessions', e.target.value, (v) => parseFloat(v))}
-                                      placeholder="50"
-                                  />
-                              </div>
-                              <div>
                                   <label className="block text-[11px] font-medium text-gray-500 mb-1">Min Current Sessions</label>
                                   <input
                                       type="number"
                                       min="0"
                                       className="w-full border text-sm p-1 rounded"
-                                      value={data.stop_conditions?.min_current_sessions ?? ''}
-                                      onChange={(e) => handleStopConditionChange('min_current_sessions', e.target.value, (v) => parseFloat(v))}
-                                      placeholder="50"
+                                      value={data.stop_conditions?.min_current_sessions ?? data.stop_conditions?.min_sessions ?? ''}
+                                      onChange={(e) => handleMinSessionsChange('min_current_sessions', e.target.value)}
+                                      placeholder="0"
                                   />
                               </div>
                               <div>
@@ -1493,9 +1541,9 @@ export default function PropertiesPanel({
                                       type="number"
                                       min="0"
                                       className="w-full border text-sm p-1 rounded"
-                                      value={data.stop_conditions?.min_baseline_sessions ?? ''}
-                                      onChange={(e) => handleStopConditionChange('min_baseline_sessions', e.target.value, (v) => parseFloat(v))}
-                                      placeholder="50"
+                                      value={data.stop_conditions?.min_baseline_sessions ?? data.stop_conditions?.min_sessions ?? ''}
+                                      onChange={(e) => handleMinSessionsChange('min_baseline_sessions', e.target.value)}
+                                      placeholder="0"
                                   />
                               </div>
                               <div>

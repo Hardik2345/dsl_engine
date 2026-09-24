@@ -9,39 +9,34 @@ function toFiniteNumber(raw) {
   return null;
 }
 
-// Sign contract: context.metrics[metric] is a signed percent (cvr_delta_pct = -17
-// means CVR fell 17%). Thresholds are magnitudes, so the raw delta is normalized to
-// "how bad is it in the configured direction":
-//   drop     -> -raw   (-17 -> 17; +5 -> -5, i.e. comfortably NORMAL)
-//   rise     ->  raw
-//   absolute -> |raw|
-// `0 - raw` rather than `-raw` so a zero delta normalizes to 0, not -0.
-function normalizeFindingValue(raw, direction) {
-  if (direction === 'rise') return raw;
-  if (direction === 'absolute') return Math.abs(raw);
-  return 0 - raw;
-}
-
-// Returns conclusive: false when the run never produced a usable value, which the
-// caller treats as "no observation" -- no state change, no recovery evidence.
+// The finding value is the metric exactly as the run produced it -- a CVR drop of
+// 17% is -17. Returns conclusive: false when the run never produced a usable value,
+// which the caller treats as "no observation": no state change.
 function resolveFindingValue(context, finding = {}) {
   const metric = finding.metric;
   const raw = context?.metrics?.[metric];
-  const numeric = toFiniteNumber(raw);
-  if (!metric || numeric == null) {
-    return { metric: metric || null, raw: raw ?? null, value: null, direction: finding.direction, conclusive: false };
+  const value = toFiniteNumber(raw);
+  if (!metric || value == null) {
+    return { metric: metric || null, value: null, conclusive: false };
   }
-  return {
-    metric,
-    raw: numeric,
-    value: normalizeFindingValue(numeric, finding.direction),
-    direction: finding.direction,
-    conclusive: true
-  };
+  return { metric, value, conclusive: true };
 }
 
-// Inclusive boundaries: value == normal is TRIGGERED, value == critical is CRITICAL.
+// Which way is "worse" comes from the thresholds themselves, so a workflow can't
+// declare a direction that contradicts its own numbers: critical below normal means
+// lower is worse (a drop, e.g. -10 / -20); critical above normal means higher is
+// worse (a rise, e.g. 10 / 20).
+function isLowerWorse(thresholds) {
+  return thresholds.critical < thresholds.normal;
+}
+
+// Inclusive boundaries: with -10 / -20, -10 is TRIGGERED and -20 is CRITICAL.
 function classifySeverity(value, thresholds) {
+  if (isLowerWorse(thresholds)) {
+    if (value <= thresholds.critical) return STATES.CRITICAL;
+    if (value <= thresholds.normal) return STATES.TRIGGERED;
+    return STATES.NORMAL;
+  }
   if (value >= thresholds.critical) return STATES.CRITICAL;
   if (value >= thresholds.normal) return STATES.TRIGGERED;
   return STATES.NORMAL;
@@ -49,6 +44,6 @@ function classifySeverity(value, thresholds) {
 
 module.exports = {
   resolveFindingValue,
-  normalizeFindingValue,
-  classifySeverity
+  classifySeverity,
+  isLowerWorse
 };

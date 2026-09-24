@@ -7,6 +7,7 @@ import {
   SUPPRESSION_LABELS,
   DELIVERY_LABELS,
   withStateConfigDefaults,
+  isLowerWorse,
 } from '../utils/stateConfig';
 
 export function StateBadge({ state }) {
@@ -79,10 +80,12 @@ export function RunStateDecisionCard({ run }) {
                   <span className="text-gray-500">Inconclusive: no {evaluation.finding?.metric || 'metric'} value</span>
                 ) : (
                   <>
-                    {formatValue(evaluation.finding?.value)}
-                    <span className="text-gray-500 font-normal">
-                      {' '}(raw {formatValue(evaluation.finding?.raw)}%, {evaluation.finding?.direction})
-                    </span>
+                    {formatValue(evaluation.finding?.value)}%
+                    {evaluation.finding?.thresholds && (
+                      <span className="text-gray-500 font-normal">
+                        {' '}(alert {evaluation.finding.thresholds.normal}, critical {evaluation.finding.thresholds.critical})
+                      </span>
+                    )}
                   </>
                 )}
               </dd>
@@ -97,15 +100,8 @@ export function RunStateDecisionCard({ run }) {
               )}
             </div>
             <div>
-              <dt className="text-gray-500">Recovery</dt>
-              <dd className="font-medium mt-1">
-                {evaluation.recovery?.pending
-                  ? `${evaluation.recovery.evidence_count}/${evaluation.recovery.required_evidence} normal runs`
-                  : 'Not pending'}
-              </dd>
-              <dd className="text-xs text-gray-500 mt-1">
-                {evaluation.trigger_type === 'manual' ? 'Manual run: not counted as evidence' : `Trigger: ${evaluation.trigger_type || '-'}`}
-              </dd>
+              <dt className="text-gray-500">Trigger</dt>
+              <dd className="font-medium mt-1 capitalize">{evaluation.trigger_type || '-'}</dd>
             </div>
           </dl>
         )}
@@ -117,7 +113,7 @@ export function RunStateDecisionCard({ run }) {
 // Workflow detail: current incident state plus recent decisions.
 export function WorkflowStateCard({ workflowId, definition }) {
   const { data: state, isLoading } = useWorkflowState(workflowId);
-  const { data: evaluations = [] } = useWorkflowStateEvaluations(workflowId, { limit: 10 });
+  const { data: evaluations = [] } = useWorkflowStateEvaluations(workflowId, { limit: 5 });
   const config = withStateConfigDefaults(definition?.state_config);
 
   return (
@@ -139,12 +135,8 @@ export function WorkflowStateCard({ workflowId, definition }) {
               <dd className="font-medium mt-1">{describeCooldown(state?.cooldown)}</dd>
             </div>
             <div>
-              <dt className="text-gray-500">Recovery</dt>
-              <dd className="font-medium mt-1">
-                {state?.recovery?.pending
-                  ? `${state.recovery.evidence_count}/${state.recovery.required_evidence} normal runs`
-                  : 'Not pending'}
-              </dd>
+              <dt className="text-gray-500">Last evaluated</dt>
+              <dd className="font-medium mt-1">{formatDate(state?.last_evaluated_at)}</dd>
             </div>
             <div>
               <dt className="text-gray-500">Last alert</dt>
@@ -154,10 +146,10 @@ export function WorkflowStateCard({ workflowId, definition }) {
         )}
 
         <p className="text-xs text-gray-500">
-          {config.finding.metric} ({config.finding.direction}): alert at {config.thresholds.normal}, critical at {config.thresholds.critical}.
-          Cooldowns {config.cooldown.triggered_minutes}m / {config.cooldown.critical_minutes}m.
+          {config.finding.metric}: alert at {config.thresholds.normal}{isLowerWorse(config.thresholds) ? ' or lower' : ' or higher'},
+          {' '}critical at {config.thresholds.critical}. Cooldowns {config.cooldown.triggered_minutes}m / {config.cooldown.critical_minutes}m.
           {config.quiet_hours.enabled ? ` Quiet ${config.quiet_hours.start}–${config.quiet_hours.end}.` : ''}
-          {' '}Recovery counts scheduled and alert-triggered runs only.
+          {' '}Returning to normal does not send an email.
         </p>
 
         {evaluations.length > 0 && (

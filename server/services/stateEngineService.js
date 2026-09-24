@@ -103,7 +103,6 @@ function buildEvaluationRow({ tenantId, workflowId, executionId, decision }) {
     notification: decision.notification,
     cooldown: decision.cooldown,
     quiet_hours: decision.quiet_hours,
-    recovery: decision.recovery,
     decision,
     delivery: { status: deliveryStatusFor(decision) }
   };
@@ -120,7 +119,7 @@ function buildInconclusiveRow({ tenantId, workflowId, executionId, triggerType, 
     conclusive: false,
     previous_state: currentState,
     resulting_state: currentState,
-    finding: { metric: finding.metric, raw: finding.raw, value: null, direction: finding.direction },
+    finding: { metric: finding.metric, value: null },
     notification: { candidate_reason: null, should_send: false, reason: null, suppressed_by: null },
     decision: null,
     delivery: { status: 'none' }
@@ -136,7 +135,6 @@ function summarize(evaluation, delivery) {
     trigger_type: evaluation.trigger_type,
     finding: evaluation.finding,
     notification: evaluation.notification,
-    recovery: evaluation.recovery || null,
     delivery_status: delivery?.status || evaluation.delivery?.status || 'none',
     delivery_error: delivery?.error || evaluation.delivery?.error || null
   };
@@ -204,36 +202,20 @@ function createStateEngineService({
     return { evaluation, replayed: false };
   }
 
-  // A failed send must not consume the cooldown (or swallow a due recovery). Hands
-  // back only the notification bookkeeping this execution wrote; the state
-  // transition itself always stands. Guarded on last_alert_at so a later execution's
-  // own alert is never undone.
+  // A failed send must not consume the cooldown. Hands back only the notification
+  // bookkeeping this execution wrote; the state transition itself always stands.
+  // Guarded on last_alert_at and the cooldown start so a later execution's own alert
+  // is never undone.
   async function rollbackBookkeeping({ tenantId, workflowId, decision }) {
     for (let attempt = 0; attempt < maxCasAttempts; attempt += 1) {
       const current = await store.getState(tenantId, workflowId);
       if (!current || !sameInstant(current.last_alert_at, decision.next.last_alert_at)) return false;
+      if (!sameInstant(current.cooldown?.started_at, decision.next.cooldown?.started_at)) return false;
 
-      let fields;
-      if (decision.notification.reason === 'RECOVERY') {
-        if (current.state !== 'NORMAL' || current.recovery?.pending) return false;
-        fields = {
-          cooldown: decision.prior_bookkeeping.cooldown || null,
-          last_alert_at: decision.prior_bookkeeping.last_alert_at || null,
-          recovery: {
-            pending: true,
-            evidence_count: decision.recovery.required_evidence,
-            required_evidence: decision.recovery.required_evidence,
-            from_state: decision.recovery.from_state || null
-          }
-        };
-      } else {
-        if (!sameInstant(current.cooldown?.started_at, decision.next.cooldown?.started_at)) return false;
-        fields = {
-          cooldown: decision.prior_bookkeeping.cooldown || null,
-          last_alert_at: decision.prior_bookkeeping.last_alert_at || null
-        };
-      }
-
+      const fields = {
+        cooldown: decision.prior_bookkeeping.cooldown || null,
+        last_alert_at: decision.prior_bookkeeping.last_alert_at || null
+      };
       if (await store.compareAndSetState(tenantId, workflowId, current.version ?? 0, fields)) return true;
     }
     return false;
@@ -267,10 +249,19 @@ function createStateEngineService({
     const email = renderStateEmail({ decision, intents, fallbackRecipients, workflowName, brandName, branding });
 
     let delivery;
-    try {
-      delivery = await sender({ to: email.to, subject: email.subject, html: email.html, text: email.text });
-    } catch (error) {
-      delivery = { status: 'failed', error: error.message };
+    if (!email.to.length) {
+      // Nothing to send to: no email node ran and none of the workflow's nodes has
+      // email turned on (e.g. an insight node with "Email Insight" unticked).
+      delivery = {
+        status: 'failed',
+        error: 'no recipients: turn on "Email Insight" on an insight node or add an Email node with recipients'
+      };
+    } else {
+      try {
+        delivery = await sender({ to: email.to, subject: email.subject, html: email.html, text: email.text });
+      } catch (error) {
+        delivery = { status: 'failed', error: error.message };
+      }
     }
 
     if (delivery?.status === 'sent') {

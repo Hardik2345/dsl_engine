@@ -2,18 +2,18 @@ import React, { useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import {
   WORKFLOW_PURPOSES,
-  MIN_REQUIRED_EVIDENCE,
   STATE_METRIC_OPTIONS,
-  STATE_DIRECTION_OPTIONS,
   getWorkflowPurpose,
   withStateConfigDefaults,
+  isLowerWorse,
 } from '../../utils/stateConfig';
 
 const inputClass = 'border border-gray-300 rounded px-2 py-1 text-sm bg-white focus:outline-none focus:ring-1 focus:ring-blue-500';
 const numberInputClass = `${inputClass} w-20`;
 
-// Keeps an empty input empty rather than coercing it to 0, so validation can flag it.
-const toNumberOrEmpty = (value) => (value === '' ? '' : Number(value));
+// Keeps an empty (or a lone "-" while typing a negative) input empty rather than
+// coercing it to 0, so validation can flag it.
+const toNumberOrEmpty = (value) => (value === '' || value === '-' ? '' : Number(value));
 
 function Field({ label, hint, children }) {
   return (
@@ -27,7 +27,7 @@ function Field({ label, hint, children }) {
 
 // Workflow-level settings for the state engine (docs/workflow-state-engine.md):
 // whether this is an RCA alert or a daily insight/report, and for RCA workflows the
-// thresholds, cooldowns, recovery evidence and quiet hours. Writes straight into the
+// thresholds, cooldowns and quiet hours. Writes straight into the
 // builder's metadata, which graphToJson spreads into the saved definition.
 export default function AlertStatePanel({ metadata, setMetadata }) {
   const [expanded, setExpanded] = useState(false);
@@ -59,7 +59,14 @@ export default function AlertStatePanel({ metadata, setMetadata }) {
     });
   };
 
-  const direction = STATE_DIRECTION_OPTIONS.find((option) => option.value === config.finding.direction);
+  const thresholdsValid = typeof config.thresholds.normal === 'number' && typeof config.thresholds.critical === 'number'
+    && config.thresholds.normal !== config.thresholds.critical;
+  let thresholdHint = "Use the metric's signed value, e.g. -10 / -20 for a drop";
+  if (thresholdsValid) {
+    thresholdHint = isLowerWorse(config.thresholds)
+      ? `Alerts on drops: ${config.thresholds.normal} or lower, critical at ${config.thresholds.critical} or lower`
+      : `Alerts on rises: ${config.thresholds.normal} or higher, critical at ${config.thresholds.critical} or higher`;
+  }
 
   let summary = 'Sends on every run';
   if (isRca) {
@@ -123,46 +130,36 @@ export default function AlertStatePanel({ metadata, setMetadata }) {
 
           {enabled && (
             <div className="flex flex-wrap gap-x-8 gap-y-4">
-              <div className="flex gap-3 items-start">
-                <Field label="Metric">
-                  <select
-                    className={inputClass}
-                    value={config.finding.metric}
-                    onChange={(e) => update('finding', 'metric', e.target.value)}
-                  >
-                    {STATE_METRIC_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label="Direction" hint={direction?.hint}>
-                  <select
-                    className={inputClass}
-                    value={config.finding.direction}
-                    onChange={(e) => update('finding', 'direction', e.target.value)}
-                  >
-                    {STATE_DIRECTION_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
-                    ))}
-                  </select>
-                </Field>
-              </div>
+              <Field label="Metric">
+                <select
+                  className={inputClass}
+                  value={config.finding.metric}
+                  onChange={(e) => update('finding', 'metric', e.target.value)}
+                >
+                  {STATE_METRIC_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </Field>
 
-              <div className="flex gap-3 items-start">
-                <Field label="Alert at (%)" hint="Triggered from this value">
-                  <input
-                    type="number" min="0" step="any" className={numberInputClass}
-                    value={config.thresholds.normal}
-                    onChange={(e) => update('thresholds', 'normal', toNumberOrEmpty(e.target.value))}
-                  />
-                </Field>
-                <Field label="Critical at (%)" hint="Critical from this value">
-                  <input
-                    type="number" min="0" step="any" className={numberInputClass}
-                    value={config.thresholds.critical}
-                    onChange={(e) => update('thresholds', 'critical', toNumberOrEmpty(e.target.value))}
-                  />
-                </Field>
+              <div className="flex flex-col gap-1">
+                <div className="flex gap-3 items-start">
+                  <Field label="Alert at (%)">
+                    <input
+                      type="number" step="any" className={numberInputClass}
+                      value={config.thresholds.normal}
+                      onChange={(e) => update('thresholds', 'normal', toNumberOrEmpty(e.target.value))}
+                    />
+                  </Field>
+                  <Field label="Critical at (%)">
+                    <input
+                      type="number" step="any" className={numberInputClass}
+                      value={config.thresholds.critical}
+                      onChange={(e) => update('thresholds', 'critical', toNumberOrEmpty(e.target.value))}
+                    />
+                  </Field>
+                </div>
+                <span className="text-[11px] text-gray-400">{thresholdHint}</span>
               </div>
 
               <div className="flex gap-3 items-start">
@@ -181,14 +178,6 @@ export default function AlertStatePanel({ metadata, setMetadata }) {
                   />
                 </Field>
               </div>
-
-              <Field label="Recovery after" hint="Consecutive normal scheduled runs. Manual runs don't count.">
-                <input
-                  type="number" min={MIN_REQUIRED_EVIDENCE} step="1" className={numberInputClass}
-                  value={config.recovery.required_evidence}
-                  onChange={(e) => update('recovery', 'required_evidence', toNumberOrEmpty(e.target.value))}
-                />
-              </Field>
 
               <div className="flex gap-3 items-start">
                 <Field label="Quiet hours" hint="Tenant timezone, both ends inclusive">

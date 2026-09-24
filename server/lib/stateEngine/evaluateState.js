@@ -15,8 +15,7 @@ function normalizePrior(prior) {
     ...base,
     ...prior,
     state: Object.values(STATES).includes(prior.state) ? prior.state : STATES.NORMAL,
-    cooldown: prior.cooldown?.started_at ? prior.cooldown : null,
-    recovery: { ...base.recovery, ...(prior.recovery || {}) }
+    cooldown: prior.cooldown?.started_at ? prior.cooldown : null
   };
 }
 
@@ -26,30 +25,18 @@ function cooldownMinutesFor(state, config) {
   return 0;
 }
 
-// Picks the notification a transition is a candidate for, and which gates apply to
-// it. Pure table lookup over spec §33 plus the recovery-evidence outcome.
+// Picks the notification a transition is a candidate for, and which gates apply.
 //   cooldownState: whose cooldown duration gates this send (null = cooldown bypassed)
 //   quietBypass:   true only for a direct NORMAL -> CRITICAL escalation
-function resolveCandidate({ prev, next, recovery, automatic, requiredEvidence }) {
-  if (next === STATES.NORMAL) {
-    // T/C -> NORMAL is only the first piece of evidence and never sends. RECOVERY
-    // can only come from a NORMAL -> NORMAL run that completes the evidence count,
-    // and only an automatic run may complete it.
-    if (prev === STATES.NORMAL && recovery.pending && automatic && recovery.evidence_count >= requiredEvidence) {
-      return { reason: REASONS.RECOVERY, cooldownState: null, quietBypass: false };
-    }
-    return null;
-  }
+// Returning to NORMAL never notifies: there are no recovery emails.
+function resolveCandidate({ prev, next }) {
+  if (next === STATES.NORMAL) return null;
 
   if (next === STATES.CRITICAL) {
     if (prev === STATES.CRITICAL) {
       return { reason: REASONS.REMINDER, cooldownState: STATES.CRITICAL, quietBypass: false };
     }
-    return {
-      reason: REASONS.ESCALATION,
-      cooldownState: null,
-      quietBypass: prev === STATES.NORMAL
-    };
+    return { reason: REASONS.ESCALATION, cooldownState: null, quietBypass: prev === STATES.NORMAL };
   }
 
   // next === TRIGGERED
@@ -62,29 +49,9 @@ function resolveCandidate({ prev, next, recovery, automatic, requiredEvidence })
   return { reason: REASONS.REMINDER, cooldownState: STATES.TRIGGERED, quietBypass: false };
 }
 
-function nextRecovery({ prev, next, prior, automatic }) {
-  if (next !== STATES.NORMAL) {
-    return { pending: false, evidence_count: 0, from_state: null };
-  }
-  if (prev !== STATES.NORMAL) {
-    // Recovery starts here. A manual run still flips the state (state always follows
-    // the finding) but contributes no evidence.
-    return { pending: true, evidence_count: automatic ? 1 : 0, from_state: prev };
-  }
-  if (prior.recovery.pending) {
-    return {
-      pending: true,
-      evidence_count: prior.recovery.evidence_count + (automatic ? 1 : 0),
-      from_state: prior.recovery.from_state || null
-    };
-  }
-  return { pending: false, evidence_count: 0, from_state: null };
-}
-
-// Pure transition + notification decision (spec §29 steps 3-9). State is computed
-// first and unconditionally; cooldown and quiet hours only ever decide
-// notification.should_send. Plain objects in, plain objects out -- the caller owns
-// persistence.
+// Pure transition + notification decision. State is computed first and
+// unconditionally; cooldown and quiet hours only ever decide notification.should_send.
+// Plain objects in, plain objects out -- the caller owns persistence.
 //
 // finding: output of severity.resolveFindingValue (must be conclusive)
 // config:  output of defaults.normalizeStateConfig
@@ -92,13 +59,10 @@ function evaluateState({ prior: rawPrior, finding, triggerType, now = new Date()
   const prior = normalizePrior(rawPrior);
   const nowDate = now instanceof Date ? now : new Date(now);
   const nowIso = nowDate.toISOString();
-  const automatic = isAutomaticTrigger(triggerType);
-  const requiredEvidence = config.recovery.required_evidence;
 
   const prev = prior.state;
   const next = classifySeverity(finding.value, config.thresholds);
-  const recovery = nextRecovery({ prev, next, prior, automatic });
-  const candidate = resolveCandidate({ prev, next, recovery, automatic, requiredEvidence });
+  const candidate = resolveCandidate({ prev, next });
 
   const quietActive = isQuietMinute(nowDate, config.quiet_hours, timezone);
 
@@ -122,21 +86,6 @@ function evaluateState({ prior: rawPrior, finding, triggerType, now = new Date()
     }
   }
 
-  let nextCooldown = prior.cooldown;
-  let nextLastAlertAt = toIso(prior.last_alert_at);
-  let nextRecoveryState = recovery;
-  if (shouldSend) {
-    nextLastAlertAt = nowIso;
-    if (candidate.reason === REASONS.RECOVERY) {
-      // A delivered recovery closes the incident: cooldown and evidence both reset,
-      // so the next incident always opens with INITIAL_TRIGGER.
-      nextCooldown = null;
-      nextRecoveryState = { pending: false, evidence_count: 0, from_state: null };
-    } else {
-      nextCooldown = { state: next, duration_minutes: cooldownMinutesFor(next, config), started_at: nowIso };
-    }
-  }
-
   // An escalation ignores cooldown; for the audit trail, only call that a bypass when
   // the existing cooldown was actually still running.
   let cooldownBypassed = false;
@@ -146,17 +95,21 @@ function evaluateState({ prior: rawPrior, finding, triggerType, now = new Date()
       && effectiveElapsedMs(prior.cooldown.started_at, nowDate, config.quiet_hours, timezone, priorDurationMs) < priorDurationMs;
   }
 
+  // Only a sent notification starts a cooldown. A suppressed one -- and a return to
+  // NORMAL -- leaves any running cooldown to expire on its own clock.
+  const nextCooldown = shouldSend
+    ? { state: next, duration_minutes: cooldownMinutesFor(next, config), started_at: nowIso }
+    : prior.cooldown;
+
   return {
     previous_state: prev,
     resulting_state: next,
     trigger_type: triggerType || null,
-    automatic,
+    automatic: isAutomaticTrigger(triggerType),
     evaluated_at: nowIso,
     finding: {
       metric: finding.metric,
-      raw: finding.raw,
       value: finding.value,
-      direction: finding.direction,
       severity: next,
       thresholds: { ...config.thresholds }
     },
@@ -173,15 +126,8 @@ function evaluateState({ prior: rawPrior, finding, triggerType, now = new Date()
       effective_elapsed_ms: effectiveElapsed
     },
     quiet_hours: { active: quietActive, bypassed: Boolean(candidate?.quietBypass && quietActive) },
-    recovery: {
-      pending: nextRecoveryState.pending,
-      evidence_count: nextRecoveryState.evidence_count,
-      required_evidence: requiredEvidence,
-      from_state: shouldSend && candidate.reason === REASONS.RECOVERY ? recovery.from_state : nextRecoveryState.from_state
-    },
     // What notification bookkeeping looked like before this run, so a failed SMTP
-    // send can hand its cooldown (or pending recovery) back -- see
-    // stateEngineService's rollback.
+    // send can hand its cooldown back -- see stateEngineService's rollback.
     prior_bookkeeping: {
       cooldown: prior.cooldown,
       last_alert_at: toIso(prior.last_alert_at)
@@ -189,9 +135,8 @@ function evaluateState({ prior: rawPrior, finding, triggerType, now = new Date()
     next: {
       state: next,
       cooldown: nextCooldown,
-      recovery: { ...nextRecoveryState, required_evidence: requiredEvidence },
       last_evaluated_at: nowIso,
-      last_alert_at: nextLastAlertAt
+      last_alert_at: shouldSend ? nowIso : toIso(prior.last_alert_at)
     }
   };
 }

@@ -5,6 +5,18 @@ const WorkflowRun = require('../models/WorkflowRun');
 const { getNextRunAt } = require('../../scheduler/app/cronUtils');
 const { validateEmailBranding } = require('../lib/emailBranding');
 
+// Report emails format money with Intl in this currency, so it must be an ISO 4217
+// code Intl accepts (e.g. INR, USD).
+function isSupportedCurrency(currency) {
+  if (typeof currency !== 'string' || !/^[A-Z]{3}$/.test(currency)) return false;
+  try {
+    new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function isSupportedTimeZone(timeZone) {
   try {
     new Intl.DateTimeFormat('en-US', { timeZone }).format(new Date());
@@ -83,6 +95,9 @@ router.post('/', async (req, res, next) => {
     if (resolvedSettings.timezone && !isSupportedTimeZone(resolvedSettings.timezone)) {
       return res.status(400).json({ error: 'timezone must be a supported IANA timezone' });
     }
+    if (resolvedSettings.currency !== undefined && !isSupportedCurrency(resolvedSettings.currency)) {
+      return res.status(400).json({ error: 'currency must be a 3-letter ISO currency code, e.g. INR' });
+    }
     const brandingErrors = validateEmailBranding(resolvedSettings.emailBranding, 'settings.emailBranding');
     if (brandingErrors.length) return res.status(400).json({ errors: brandingErrors });
 
@@ -116,6 +131,9 @@ router.patch('/:tenantId', async (req, res, next) => {
     if (settings !== undefined) {
       if (settings.timezone && !isSupportedTimeZone(settings.timezone)) {
         return res.status(400).json({ error: 'timezone must be a supported IANA timezone' });
+      }
+      if (settings.currency !== undefined && !isSupportedCurrency(settings.currency)) {
+        return res.status(400).json({ error: 'currency must be a 3-letter ISO currency code, e.g. INR' });
       }
       const brandingErrors = validateEmailBranding(settings.emailBranding, 'settings.emailBranding');
       if (brandingErrors.length) return res.status(400).json({ errors: brandingErrors });

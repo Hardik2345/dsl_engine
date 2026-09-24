@@ -14,7 +14,7 @@ import {
 import {
   getPartialDayProductCompatibilityErrors,
 } from '../../utils/workflowValidation';
-import { getStateConfigErrors } from '../../utils/stateConfig';
+import { getStateConfigErrors, withStateConfigDefaults } from '../../utils/stateConfig';
 
 const sanitizeIdSegment = (value) =>
   String(value || '')
@@ -309,6 +309,11 @@ function WorkflowBuilderContent({
   const handleSave = async () => {
     try {
       const workflowJson = graphToJson(nodes, edges, metadata);
+      // Rewrites a state_config saved in an older shape (direction/recovery) to the
+      // current one, even when the panel was never touched this session.
+      if (workflowJson.state_config) {
+        workflowJson.state_config = withStateConfigDefaults(workflowJson.state_config);
+      }
       const compatibilityErrors = getPartialDayProductCompatibilityErrors(workflowJson);
       if (compatibilityErrors.length) {
         toast.error(compatibilityErrors[0]);

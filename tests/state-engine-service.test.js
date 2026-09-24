@@ -6,10 +6,9 @@ const { createFakeStateStore, createRecordingSender } = require('./helpers/fakeS
 
 const config = {
   enabled: true,
-  finding: { metric: 'cvr_delta_pct', direction: 'drop' },
-  thresholds: { normal: 15, critical: 25 },
+  finding: { metric: 'cvr_delta_pct' },
+  thresholds: { normal: -15, critical: -25 },
   cooldown: { triggered_minutes: 60, critical_minutes: 30 },
-  recovery: { required_evidence: 2 },
   quiet_hours: { enabled: false, start: '23:00', end: '07:00' }
 };
 
@@ -33,23 +32,24 @@ function setup({ statuses, clockStart = '2026-01-01T10:00:00Z' } = {}) {
   return { store, sender, service, run, setClock };
 }
 
-test('sends once, wraps the captured email with a banner, and persists the transition', async () => {
+test('sends the captured email exactly as rendered, once, and persists the transition', async () => {
   const { store, sender, run } = setup();
   const result = await run('run-1', -17);
 
   assert.equal(result.delivery.status, 'sent');
   assert.equal(sender.calls.length, 1);
   assert.deepEqual(sender.calls[0].to, ['ops@example.com']);
-  assert.match(sender.calls[0].subject, /^\[TRIGGERED\] CVR RCA$/);
-  assert.match(sender.calls[0].html, /<body><div style="border-left/);
-  assert.match(sender.calls[0].html, /analysis/);
+  // No state banner or [STATE] prefix: subject and body are the workflow's own.
+  assert.equal(sender.calls[0].subject, 'CVR RCA');
+  assert.equal(sender.calls[0].html, '<html><body><p>analysis</p></body></html>');
+  assert.equal(sender.calls[0].text, 'analysis');
 
   const state = await store.getState('t1', 'wf1');
   assert.equal(state.state, 'TRIGGERED');
   assert.equal(state.version, 1);
   assert.equal(state.last_execution_id, 'run-1');
   assert.equal(result.summary.delivery_status, 'sent');
-  assert.equal(result.summary.finding.value, 17);
+  assert.equal(result.summary.finding.value, -17);
 });
 
 test('a retry of the same execution neither transitions again nor resends', async () => {
@@ -84,7 +84,7 @@ test('a crash between the state write and the audit row is recovered from last_d
   assert.equal((await store.getState('t1', 'wf1')).version, 1);
   assert.equal(retry.evaluation.previous_state, 'NORMAL');
   assert.equal(retry.evaluation.resulting_state, 'TRIGGERED');
-  assert.equal(retry.evaluation.finding.value, 17);
+  assert.equal(retry.evaluation.finding.value, -17);
   assert.equal(sender.calls.length, 1);
 });
 
@@ -122,7 +122,6 @@ test('a lost compare-and-set re-reads and recomputes from the winning write', as
   const result = await run('run-2', -5);
   assert.equal(result.evaluation.previous_state, 'CRITICAL');
   assert.equal(result.evaluation.resulting_state, 'NORMAL');
-  assert.equal(result.evaluation.recovery.from_state, 'CRITICAL');
   assert.equal((await store.getState('t1', 'wf1')).version, 3);
 });
 
@@ -165,29 +164,6 @@ test('SMTP failure rolls back the cooldown so the next reminder is not blocked',
   assert.equal(sender.calls.length, 3);
 });
 
-test('SMTP failure on RECOVERY restores the pending recovery without changing state', async () => {
-  const { store, sender, run, setClock } = setup({ statuses: ['sent', 'failed', 'sent'] });
-  await run('run-1', -17);
-  setClock('2026-01-01T10:10:00Z');
-  await run('run-2', -5); // evidence 1
-  setClock('2026-01-01T10:20:00Z');
-  const failed = await run('run-3', -5); // RECOVERY, fails
-
-  assert.equal(failed.evaluation.notification.reason, 'RECOVERY');
-  assert.equal(failed.delivery.status, 'failed');
-  const restored = await store.getState('t1', 'wf1');
-  assert.equal(restored.state, 'NORMAL');
-  assert.equal(restored.recovery.pending, true);
-  assert.equal(restored.recovery.evidence_count, 2);
-  assert.equal(restored.recovery.from_state, 'TRIGGERED');
-
-  setClock('2026-01-01T10:30:00Z');
-  const next = await run('run-4', -5);
-  assert.equal(next.evaluation.notification.reason, 'RECOVERY');
-  assert.equal(next.delivery.status, 'sent');
-  assert.equal(sender.calls.length, 3);
-});
-
 test('rollback never undoes a newer execution\'s alert', async () => {
   const { store, service, run, setClock } = setup();
   await run('run-1', -17);
@@ -205,16 +181,41 @@ test('rollback never undoes a newer execution\'s alert', async () => {
   assert.equal((await store.getState('t1', 'wf1')).state, 'CRITICAL');
 });
 
-test('RECOVERY with no captured email falls back to the built-in email and workflow recipients', async () => {
-  const { sender, run, setClock } = setup();
-  await run('run-1', -28);
-  setClock('2026-01-01T10:10:00Z');
-  await run('run-2', -2, { intents: [] });
-  setClock('2026-01-01T10:20:00Z');
-  const recovered = await run('run-3', -1, { intents: [], fallbackRecipients: ['team@example.com'] });
+test('with no captured email, the built-in email goes to the workflow recipients', async () => {
+  const { sender, run } = setup();
+  const result = await run('run-1', -28, { intents: [], fallbackRecipients: ['team@example.com'] });
 
-  assert.equal(recovered.delivery.status, 'sent');
+  assert.equal(result.delivery.status, 'sent');
   const mail = sender.calls.at(-1);
   assert.deepEqual(mail.to, ['team@example.com']);
-  assert.match(mail.subject, /^\[RECOVERED\] CVR drop: cvr_delta_pct has recovered to its normal trend\.$/);
+  assert.equal(mail.subject, 'CVR drop');
+  assert.match(mail.text, /cvr_delta_pct is -28, at or below the critical threshold of -25\./);
+});
+
+test('returning to NORMAL records the transition and sends nothing', async () => {
+  const { sender, run, setClock } = setup();
+  await run('run-1', -17);
+  setClock('2026-01-01T10:10:00Z');
+  const back = await run('run-2', -3);
+  setClock('2026-01-01T10:20:00Z');
+  const still = await run('run-3', -2);
+
+  assert.equal(back.evaluation.previous_state, 'TRIGGERED');
+  assert.equal(back.evaluation.resulting_state, 'NORMAL');
+  assert.equal(back.delivery.status, 'none');
+  assert.equal(still.delivery.status, 'none');
+  assert.equal(sender.calls.length, 1);
+});
+
+test('no recipients fails clearly without calling SMTP, and hands the cooldown back', async () => {
+  const { store, sender, run } = setup();
+  const result = await run('run-1', -17, { intents: [], fallbackRecipients: [] });
+
+  assert.equal(result.delivery.status, 'failed');
+  assert.match(result.delivery.error, /Email Insight/);
+  assert.equal(result.delivery.rolledBack, true);
+  assert.equal(sender.calls.length, 0);
+  const state = await store.getState('t1', 'wf1');
+  assert.equal(state.state, 'TRIGGERED');
+  assert.equal(state.cooldown, null);
 });

@@ -85,6 +85,12 @@ async function executeRun({ run, runId }) {
   if (!targetRun.context.meta.brandName && tenant?.name) {
     targetRun.context.meta.brandName = tenant.name;
   }
+  // Report emails format `currency` cards/columns in the tenant's currency. Always
+  // taken from the tenant's current setting (never from the run's saved context),
+  // so a rerun of an older run picks up a currency changed since.
+  if (tenant?.settings?.currency) {
+    targetRun.context.meta.currency = tenant.settings.currency;
+  }
   if (!targetRun.context.meta.emailBranding && tenant?.settings?.emailBranding) {
     targetRun.context.meta.emailBranding = { ...tenant.settings.emailBranding };
   }

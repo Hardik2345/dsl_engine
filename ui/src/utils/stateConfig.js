@@ -7,8 +7,6 @@ export const WORKFLOW_PURPOSES = {
   DAILY_INSIGHT: 'daily_insight',
 };
 
-export const MIN_REQUIRED_EVIDENCE = 2;
-
 // Signed percent deltas produced by the metric_compare node.
 export const STATE_METRIC_OPTIONS = [
   { value: 'cvr_delta_pct', label: 'CVR change %' },
@@ -16,20 +14,17 @@ export const STATE_METRIC_OPTIONS = [
   { value: 'orders_delta_pct', label: 'Orders change %' },
   { value: 'atc_sessions_delta_pct', label: 'ATC sessions change %' },
   { value: 'atc_rate_delta_pct', label: 'ATC rate change %' },
+  { value: 'sales_delta_pct', label: 'Total sales change % (needs "sales" in Metric Compare)' },
+  { value: 'aov_delta_pct', label: 'AOV change % (needs "aov" in Metric Compare)' },
 ];
 
-export const STATE_DIRECTION_OPTIONS = [
-  { value: 'drop', label: 'Drop', hint: 'A change of -17% counts as 17' },
-  { value: 'rise', label: 'Rise', hint: 'A change of +17% counts as 17' },
-  { value: 'absolute', label: 'Either way', hint: 'Both -17% and +17% count as 17' },
-];
-
+// Thresholds are signed values of the metric. Critical below normal alerts on drops
+// (-10 / -20); critical above normal alerts on rises (10 / 20).
 export const DEFAULT_STATE_CONFIG = {
   enabled: false,
-  finding: { metric: 'cvr_delta_pct', direction: 'drop' },
-  thresholds: { normal: 15, critical: 25 },
+  finding: { metric: 'cvr_delta_pct' },
+  thresholds: { normal: -15, critical: -25 },
   cooldown: { triggered_minutes: 60, critical_minutes: 30 },
-  recovery: { required_evidence: MIN_REQUIRED_EVIDENCE },
   quiet_hours: { enabled: false, start: '23:00', end: '07:00' },
 };
 
@@ -49,18 +44,35 @@ export function isStateEngineEnabled(definition = {}) {
   return getWorkflowPurpose(definition) === WORKFLOW_PURPOSES.RCA && definition?.state_config?.enabled === true;
 }
 
-// Fills any missing section with its default so the form always has a value to show.
+// Early saved configs had finding.direction "drop" with positive magnitudes (15/25)
+// and a recovery section. Rewrites them to the current signed shape, the same
+// conversion the server applies, so re-saving an old workflow can't flip a drop
+// alert into a rise alert or fail validation on the removed fields.
+function toSignedThresholds(source) {
+  const thresholds = { ...DEFAULT_STATE_CONFIG.thresholds, ...(source.thresholds || {}) };
+  const legacyDrop = source.finding?.direction === 'drop'
+    && typeof thresholds.normal === 'number' && thresholds.normal >= 0
+    && typeof thresholds.critical === 'number' && thresholds.critical >= 0;
+  return legacyDrop
+    ? { normal: 0 - thresholds.normal, critical: 0 - thresholds.critical }
+    : thresholds;
+}
+
+// Fills any missing section with its default so the form always has a value to show,
+// and keeps only the fields the current state_config supports.
 export function withStateConfigDefaults(config) {
   const source = config || {};
   return {
-    ...DEFAULT_STATE_CONFIG,
-    ...source,
-    finding: { ...DEFAULT_STATE_CONFIG.finding, ...(source.finding || {}) },
-    thresholds: { ...DEFAULT_STATE_CONFIG.thresholds, ...(source.thresholds || {}) },
+    enabled: source.enabled === true,
+    finding: { metric: source.finding?.metric || DEFAULT_STATE_CONFIG.finding.metric },
+    thresholds: toSignedThresholds(source),
     cooldown: { ...DEFAULT_STATE_CONFIG.cooldown, ...(source.cooldown || {}) },
-    recovery: { ...DEFAULT_STATE_CONFIG.recovery, ...(source.recovery || {}) },
     quiet_hours: { ...DEFAULT_STATE_CONFIG.quiet_hours, ...(source.quiet_hours || {}) },
   };
+}
+
+export function isLowerWorse(thresholds = {}) {
+  return thresholds.critical < thresholds.normal;
 }
 
 const isNumber = (value) => typeof value === 'number' && Number.isFinite(value);
@@ -76,20 +88,29 @@ export function getStateConfigErrors(workflowJson = {}) {
     return errors;
   }
 
+  // Mirrors the server: the state engine emails whoever the workflow's own email
+  // nodes and email-enabled insight nodes would have, so it needs at least one.
+  const hasRecipients = (workflowJson.nodes || []).some((node) => {
+    if (node.type === 'email') return Array.isArray(node.to) && node.to.length > 0;
+    if (node.type === 'insight') return node.email?.enabled && Array.isArray(node.email.to) && node.email.to.length > 0;
+    return false;
+  });
+  if (!hasRecipients) {
+    errors.push('Alert state needs someone to email: turn on "Email Insight" on an insight node or add an Email node');
+  }
+
   const { normal, critical } = config.thresholds || {};
-  if (!isNumber(normal) || normal < 0) errors.push('Alert threshold must be a number of 0 or more');
+  if (!isNumber(normal)) errors.push('Alert threshold must be a number');
   if (!isNumber(critical)) errors.push('Critical threshold must be a number');
-  else if (isNumber(normal) && critical <= normal) errors.push('Critical threshold must be greater than the alert threshold');
+  if (isNumber(normal) && isNumber(critical) && normal === critical) {
+    errors.push('Critical threshold must differ from the alert threshold');
+  }
 
   ['triggered_minutes', 'critical_minutes'].forEach((field) => {
     if (!isWholeAtLeast(config.cooldown?.[field], 0)) {
       errors.push(`${field === 'critical_minutes' ? 'Critical' : 'Triggered'} cooldown must be a whole number of minutes`);
     }
   });
-
-  if (!isWholeAtLeast(config.recovery?.required_evidence, MIN_REQUIRED_EVIDENCE)) {
-    errors.push(`Recovery needs at least ${MIN_REQUIRED_EVIDENCE} normal runs`);
-  }
 
   if (config.quiet_hours?.enabled) {
     if (!HHMM_RE.test(config.quiet_hours.start || '') || !HHMM_RE.test(config.quiet_hours.end || '')) {
@@ -110,7 +131,6 @@ export const NOTIFICATION_REASON_LABELS = {
   REMINDER: 'Reminder',
   ESCALATION: 'Escalation',
   DE_ESCALATION: 'Improved',
-  RECOVERY: 'Recovery',
 };
 
 export const SUPPRESSION_LABELS = {

@@ -14,7 +14,7 @@ const WorkflowStateEvaluationSchema = new mongoose.Schema(
     executed_at: { type: Date, required: true },
     trigger_type: { type: String, default: null },
     automatic: { type: Boolean, default: false },
-    // false when the run produced no usable finding value: no state change, no evidence.
+    // false when the run produced no usable finding value: no state change.
     conclusive: { type: Boolean, default: true },
     previous_state: { type: String, default: null },
     resulting_state: { type: String, default: null },
@@ -22,7 +22,6 @@ const WorkflowStateEvaluationSchema = new mongoose.Schema(
     notification: { type: mongoose.Schema.Types.Mixed, default: null },
     cooldown: { type: mongoose.Schema.Types.Mixed, default: null },
     quiet_hours: { type: mongoose.Schema.Types.Mixed, default: null },
-    recovery: { type: mongoose.Schema.Types.Mixed, default: null },
     decision: { type: mongoose.Schema.Types.Mixed, default: null },
     delivery: {
       status: {

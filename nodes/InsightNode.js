@@ -103,6 +103,19 @@ async function InsightNode(def, context, runtime = {}) {
     top_sessions_delta_pct_fmt: formatPct(topEvidence?.deltas?.sessions_delta_pct)
   };
 
+  // Per-breakdown tokens, e.g. {{cvr_utm_source_drops_top1_value}} and
+  // {{cvr_utm_source_drops_top1_cvr_delta_pct_fmt}}, so one insight can name the top
+  // rows of any breakdown in the run -- not only its own output_key evidence -- in
+  // that breakdown's own ranking order. Reading these instead of the shared
+  // metrics.top_* avoids quoting whichever breakdown happened to run last.
+  Object.entries(breakdowns).forEach(([key, list]) => {
+    if (!Array.isArray(list)) return;
+    Object.entries(buildTopEvidenceTokens(list)).forEach(([token, tokenValue]) => {
+      const name = `${key}_${token}`;
+      if (!(name in templateContext)) templateContext[name] = tokenValue;
+    });
+  });
+
   // --- Render output ---
   const summary = renderTemplate(templateObj.summary, templateContext);
   const configuredDetails = Array.isArray(templateObj.details)

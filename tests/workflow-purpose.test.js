@@ -9,10 +9,9 @@ const { createFakeStateStore, createRecordingSender } = require('./helpers/fakeS
 
 const stateConfig = {
   enabled: true,
-  finding: { metric: 'cvr_delta_pct', direction: 'drop' },
-  thresholds: { normal: 15, critical: 25 },
+  finding: { metric: 'cvr_delta_pct' },
+  thresholds: { normal: -15, critical: -25 },
   cooldown: { triggered_minutes: 60, critical_minutes: 30 },
-  recovery: { required_evidence: 2 },
   quiet_hours: { enabled: true, start: '00:00', end: '23:59' } // always quiet
 };
 
@@ -128,18 +127,27 @@ test('validation: workflow_purpose and state_config', () => {
   assert.ok(errorsFor({ workflow_purpose: 'weekly' }).some((e) => /workflow_purpose must be one of/.test(e)));
   assert.ok(errorsFor({ workflow_purpose: 'daily_insight', state_config: stateConfig })
     .some((e) => /cannot be enabled for a daily_insight/.test(e)));
-  assert.ok(errorsFor({ state_config: { ...stateConfig, thresholds: { normal: 25, critical: 25 } } })
-    .some((e) => /critical must be greater/.test(e)));
-  assert.ok(errorsFor({ state_config: { ...stateConfig, finding: { metric: 'cvr_delta_pct', direction: 'down' } } })
-    .some((e) => /direction must be one of/.test(e)));
-  assert.ok(errorsFor({ state_config: { ...stateConfig, finding: { metric: 'CVR Delta', direction: 'drop' } } })
+  // Negative thresholds (drop) and positive ones (rise) are both valid.
+  assert.equal(validateWorkflowDefinition(definition({ state_config: { ...stateConfig, thresholds: { normal: 10, critical: 20 } } })).ok, true);
+  assert.ok(errorsFor({ state_config: { ...stateConfig, thresholds: { normal: -25, critical: -25 } } })
+    .some((e) => /critical must differ/.test(e)));
+  assert.ok(errorsFor({ state_config: { ...stateConfig, thresholds: { normal: '-10', critical: -20 } } })
+    .some((e) => /thresholds.normal must be a number/.test(e)));
+  assert.ok(errorsFor({ state_config: { ...stateConfig, finding: { metric: 'cvr_delta_pct', direction: 'drop' } } })
+    .some((e) => /direction is no longer supported/.test(e)));
+  assert.ok(errorsFor({ state_config: { ...stateConfig, finding: { metric: 'CVR Delta' } } })
     .some((e) => /finding.metric/.test(e)));
-  assert.ok(errorsFor({ state_config: { ...stateConfig, recovery: { required_evidence: 1 } } })
-    .some((e) => /required_evidence must be a whole number >= 2/.test(e)));
+  assert.ok(errorsFor({ state_config: { ...stateConfig, recovery: { required_evidence: 2 } } })
+    .some((e) => /recovery is no longer supported/.test(e)));
   assert.ok(errorsFor({ state_config: { ...stateConfig, cooldown: { triggered_minutes: -5 } } })
     .some((e) => /cooldown.triggered_minutes/.test(e)));
   assert.ok(errorsFor({ state_config: { ...stateConfig, quiet_hours: { enabled: true, start: '7pm', end: '07:00' } } })
     .some((e) => /quiet_hours.start must be HH:MM/.test(e)));
+  const noEmail = definition({ state_config: stateConfig });
+  noEmail.nodes = [
+    { ...noEmail.nodes[0], email: { ...noEmail.nodes[0].email, enabled: false }, next: undefined }
+  ];
+  assert.ok(validateWorkflowDefinition(noEmail).errors.some((e) => /no node sends email/.test(e)));
   // A disabled config is not validated beyond its shape.
   assert.equal(validateWorkflowDefinition(definition({ state_config: { enabled: false } })).ok, true);
 });

@@ -23,12 +23,6 @@ const WorkflowStateSchema = new mongoose.Schema(
       ),
       default: null
     },
-    recovery: {
-      pending: { type: Boolean, default: false },
-      evidence_count: { type: Number, default: 0 },
-      required_evidence: { type: Number, default: 2 },
-      from_state: { type: String, default: null }
-    },
     last_evaluated_at: { type: Date, default: null },
     last_alert_at: { type: Date, default: null },
     last_execution_id: { type: String, default: null },
