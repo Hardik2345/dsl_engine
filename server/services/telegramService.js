@@ -1,10 +1,13 @@
-const DEFAULT_TIMEOUT_MS = 10000;
+const telegramBot = require('./telegramBot');
+
+// Telegram's hard limit for one message's text.
+const TELEGRAM_MAX_MESSAGE_LENGTH = 4096;
 
 function normalizeUsers(users = []) {
   return (Array.isArray(users) ? users : [])
     .filter((user) => user && typeof user === 'object')
     .map((user) => ({
-      ...(user.username ? { username: String(user.username).trim() } : {}),
+      ...(user.username ? { username: String(user.username).trim().replace(/^@/, '') } : {}),
       ...(user.telegramChatId ? { telegramChatId: String(user.telegramChatId).trim() } : {})
     }))
     .filter((user) => user.username || user.telegramChatId);
@@ -18,73 +21,78 @@ function validateTelegramUsers(users = []) {
   return { ok: true, users: normalized };
 }
 
-async function sendTelegram({ title, message, severity = 'info', users, fetchImpl = fetch }) {
+// "[SEVERITY] title" on the first line, then the message body -- the same parts the
+// standalone message service used, one per line instead of run together, and cut
+// to Telegram's per-message limit.
+function formatTelegramMessage({ title, message, severity }) {
+  const header = [severity ? `[${String(severity).toUpperCase()}]` : '', title || ''].filter(Boolean).join(' ');
+  const text = [header, message || ''].filter(Boolean).join('\n').trim();
+  if (text.length <= TELEGRAM_MAX_MESSAGE_LENGTH) return text;
+  return `${text.slice(0, TELEGRAM_MAX_MESSAGE_LENGTH - 1)}…`;
+}
+
+/**
+ * Sends one alert to Telegram users, in-process through the engine's own bot
+ * (ported from the standalone message service's POST /alerts). Users are given by
+ * `username` (resolved through links made with GET /telegram/link) or a raw
+ * `telegramChatId`. Delivery is per user: one failure doesn't stop the others.
+ *
+ * Returns { status: 'sent' | 'partial' | 'failed', provider, users, results, error }.
+ * `deps` lets tests swap the Telegram and database calls.
+ */
+async function sendTelegram({ title, message, severity = 'info', users, deps = telegramBot }) {
   const recipients = validateTelegramUsers(users);
   if (!recipients.ok) {
     return { status: 'failed', provider: 'telegram', error: recipients.error, users: [] };
   }
-
-  const baseUrl = process.env.TELEGRAM_SERVICE_URL;
-  const secret = process.env.TELEGRAM_SERVICE_SECRET;
-  if (!baseUrl || !secret) {
+  if (!deps.isTelegramConfigured()) {
     return {
       status: 'failed',
       provider: 'telegram',
       users: recipients.users,
-      error: 'TELEGRAM_SERVICE_URL and TELEGRAM_SERVICE_SECRET are required'
+      error: 'TELEGRAM_BOT_TOKEN is not configured'
     };
   }
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+  const text = formatTelegramMessage({ title, message, severity });
+  if (!text) {
+    return { status: 'failed', provider: 'telegram', users: recipients.users, error: 'alert has no title or message' };
+  }
+
   try {
-    const response = await fetchImpl(`${baseUrl.replace(/\/$/, '')}/alerts`, {
-      method: 'POST',
-      headers: {
-        'x-shared-secret': secret,
-        'x-drains': 'TELEGRAM',
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        alert: { title, message, severity },
-        users: recipients.users
-      }),
-      signal: controller.signal
-    });
+    const resolved = await deps.resolveChatIds(recipients.users);
+    const sendable = resolved.filter((user) => user.telegramChatId);
+    const unresolved = resolved
+      .filter((user) => !user.telegramChatId)
+      .map((user) => ({
+        username: user.username,
+        success: false,
+        error: `no linked Telegram chat for "${user.username}" (send them a "Copy Telegram link" link and have them press Start)`
+      }));
 
-    const responseText = await response.text();
-    let responseBody;
-    try {
-      responseBody = responseText ? JSON.parse(responseText) : null;
-    } catch {
-      responseBody = responseText;
-    }
+    const sent = sendable.length ? await deps.sendToUsers(sendable, text) : [];
+    const results = [...sent, ...unresolved];
+    const succeeded = results.filter((result) => result.success).length;
 
-    const failedResults = Array.isArray(responseBody?.results)
-      ? responseBody.results.filter((result) => result && result.success === false)
-      : [];
+    let status = 'failed';
+    if (succeeded === results.length) status = 'sent';
+    else if (succeeded > 0) status = 'partial';
 
-    if (!response.ok || failedResults.length) {
-      return {
-        status: failedResults.length && response.ok ? 'partial' : 'failed',
-        provider: 'telegram',
-        users: recipients.users,
-        error: failedResults[0]?.error || responseBody?.error || `Telegram service returned ${response.status}`,
-        response: responseBody
-      };
-    }
-
-    return { status: 'sent', provider: 'telegram', users: recipients.users, response: responseBody };
+    return {
+      status,
+      provider: 'telegram',
+      users: recipients.users,
+      results,
+      ...(status === 'sent' ? {} : { error: results.find((result) => !result.success)?.error || 'telegram delivery failed' })
+    };
   } catch (error) {
     return {
       status: 'failed',
       provider: 'telegram',
       users: recipients.users,
-      error: error.name === 'AbortError' ? 'Telegram service request timed out' : error.message
+      error: error?.message || 'telegram delivery failed'
     };
-  } finally {
-    clearTimeout(timeout);
   }
 }
 
-module.exports = { sendTelegram, validateTelegramUsers };
+module.exports = { sendTelegram, validateTelegramUsers, formatTelegramMessage, TELEGRAM_MAX_MESSAGE_LENGTH };

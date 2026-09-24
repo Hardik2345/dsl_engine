@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const MessagingNode = require('../nodes/MessagingNode');
-const { sendTelegram } = require('../server/services/telegramService');
+const { sendTelegram, formatTelegramMessage, TELEGRAM_MAX_MESSAGE_LENGTH } = require('../server/services/telegramService');
 
 function context() {
   return {
@@ -39,37 +39,65 @@ test('messaging node sends both enabled channels independently', async () => {
   assert.equal(calls[1].payload.severity, 'critical');
 });
 
-test('telegram service sends the curl-equivalent headers and payload', async () => {
-  const originalUrl = process.env.TELEGRAM_SERVICE_URL;
-  const originalSecret = process.env.TELEGRAM_SERVICE_SECRET;
-  process.env.TELEGRAM_SERVICE_URL = 'http://telegram-service.test';
-  process.env.TELEGRAM_SERVICE_SECRET = 'test-secret';
+// In-process Telegram delivery (ported from the standalone message service). The
+// bot API and the linked-users lookup are swapped for fakes via `deps`.
+function fakeTelegram({ linked = {}, failChatIds = [], configured = true } = {}) {
+  const sent = [];
+  return {
+    sent,
+    isTelegramConfigured: () => configured,
+    resolveChatIds: async (users) => users.map((user) => ({
+      username: user.username,
+      telegramChatId: user.telegramChatId || linked[user.username] || null
+    })),
+    sendToUsers: async (users, text) => users.map((user) => {
+      sent.push({ chatId: user.telegramChatId, text });
+      return failChatIds.includes(user.telegramChatId)
+        ? { telegramChatId: user.telegramChatId, username: user.username, success: false, error: 'Forbidden: bot was blocked by the user' }
+        : { telegramChatId: user.telegramChatId, username: user.username, success: true };
+    })
+  };
+}
 
-  let request;
-  try {
-    const result = await sendTelegram({
-      title: 'CVR drop',
-      message: 'Conversion rate dropped',
-      severity: 'critical',
-      users: [{ username: 'real-user' }],
-      fetchImpl: async (url, options) => {
-        request = { url, options };
-        return new Response(JSON.stringify({ delivered: 1 }), { status: 200 });
-      }
-    });
+test('telegram: linked usernames and raw chat ids both receive the formatted alert', async () => {
+  const deps = fakeTelegram({ linked: { ops_lead: '111' } });
+  const result = await sendTelegram({
+    title: 'CVR drop', message: 'Conversion rate dropped', severity: 'critical',
+    users: [{ username: '@ops_lead' }, { telegramChatId: '222' }], deps
+  });
 
-    assert.equal(result.status, 'sent');
-    assert.equal(request.url, 'http://telegram-service.test/alerts');
-    assert.equal(request.options.headers['x-shared-secret'], 'test-secret');
-    assert.equal(request.options.headers['x-drains'], 'TELEGRAM');
-    assert.deepEqual(JSON.parse(request.options.body), {
-      alert: { title: 'CVR drop', message: 'Conversion rate dropped', severity: 'critical' },
-      users: [{ username: 'real-user' }]
-    });
-  } finally {
-    if (originalUrl === undefined) delete process.env.TELEGRAM_SERVICE_URL;
-    else process.env.TELEGRAM_SERVICE_URL = originalUrl;
-    if (originalSecret === undefined) delete process.env.TELEGRAM_SERVICE_SECRET;
-    else process.env.TELEGRAM_SERVICE_SECRET = originalSecret;
-  }
+  assert.equal(result.status, 'sent');
+  assert.deepEqual(deps.sent.map((m) => m.chatId), ['111', '222']);
+  assert.equal(deps.sent[0].text, ['[CRITICAL] CVR drop', 'Conversion rate dropped'].join('\n'));
+});
+
+test('telegram: an unlinked username is reported, and the others still get it (partial)', async () => {
+  const deps = fakeTelegram({ linked: { ops_lead: '111' } });
+  const result = await sendTelegram({ title: 'CVR drop', message: 'm', users: [{ username: 'ops_lead' }, { username: 'nobody' }], deps });
+
+  assert.equal(result.status, 'partial');
+  assert.equal(deps.sent.length, 1);
+  assert.match(result.error, /no linked Telegram chat for "nobody"/);
+});
+
+test('telegram: every recipient failing is failed, not partial', async () => {
+  const deps = fakeTelegram({ linked: { ops_lead: '111' }, failChatIds: ['111'] });
+  const result = await sendTelegram({ title: 'CVR drop', message: 'm', users: [{ username: 'ops_lead' }], deps });
+  assert.equal(result.status, 'failed');
+  assert.match(result.error, /blocked/);
+});
+
+test('telegram: a missing bot token fails clearly without trying to send', async () => {
+  const deps = fakeTelegram({ configured: false });
+  const result = await sendTelegram({ title: 'CVR drop', message: 'm', users: [{ username: 'ops_lead' }], deps });
+  assert.equal(result.status, 'failed');
+  assert.equal(result.error, 'TELEGRAM_BOT_TOKEN is not configured');
+  assert.equal(deps.sent.length, 0);
+});
+
+test('telegram: messages are cut to the 4096-character limit', () => {
+  const text = formatTelegramMessage({ title: 'T', message: 'x'.repeat(10000), severity: 'info' });
+  assert.equal(text.length, TELEGRAM_MAX_MESSAGE_LENGTH);
+  assert.ok(text.startsWith(['[INFO] T', 'xxx'].join('\n')));
+  assert.ok(text.endsWith('…'));
 });
