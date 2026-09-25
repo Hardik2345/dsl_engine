@@ -152,12 +152,12 @@ function reportTemplate(metrics = sixCards) {
   };
 }
 
-test('six KPI cards render in two rows of three, with currency in the tenant currency', () => {
+test('six KPI cards render three per row on desktop and two per row on phones, with currency in the tenant currency', () => {
   const rendered = renderEmail({ format: 'report', context: reportContext(), template: reportTemplate(), subject: 'Report' });
-  // Between the title and the first table: just the KPI cards.
-  const titleEnd = rendered.html.indexOf('Conversion rate drop') + 'Conversion rate drop'.length;
-  const cardsTable = rendered.html.slice(titleEnd, rendered.html.indexOf('Products'));
-  assert.equal((cardsTable.match(/<tr>/g) || []).length, 2);
+  const cards = rendered.html.match(/class="rpt-kpi-card" style="[^"]*width:33\.3333%/g) || [];
+  assert.equal(cards.length, 6);
+  assert.match(rendered.html, /<meta name="viewport" content="width=device-width, initial-scale=1">/);
+  assert.match(rendered.html, /@media only screen and \(max-width: 600px\)[\s\S]*\.rpt-kpi-card \{ width: 50% !important;/);
   assert.match(rendered.text, /Total sales: ₹12,34,567\.5 \(-11\.20%\)/);
   assert.match(rendered.text, /AOV: ₹1,264\.9 \(\+3\.40%\)/);
   assert.match(rendered.text, /ATC sessions: 5,019 \(-9\.39%\)/);
@@ -190,4 +190,20 @@ test('validation allows up to six KPI cards and the currency format', () => {
   assert.equal(validateWorkflowDefinition(definition(sixCards)).ok, true);
   const seven = [...sixCards, sixCards[0]];
   assert.ok(validateWorkflowDefinition(definition(seven)).errors.some((e) => /one to 6 items/.test(e)));
+});
+
+test('four or fewer KPI cards share one desktop row', () => {
+  const rendered = renderEmail({ format: 'report', context: reportContext(), template: reportTemplate(sixCards.slice(0, 4)), subject: 'R' });
+  assert.equal((rendered.html.match(/class="rpt-kpi-card" style="[^"]*width:25\.0000%/g) || []).length, 4);
+});
+
+test('table numbers never wrap (a change stays with its arrow); text cells may wrap', () => {
+  const ctx = reportContext({
+    breakdowns: { rows: [{ display_value: 'Oud Nirvana, Oud Rocks & White Oud Perfume 90 ML', deltas: { cvr_delta_pct: -35.02 } }] }
+  });
+  const template = reportTemplate();
+  template.tables[0].columns.push({ label: 'CVR change', path: 'deltas.cvr_delta_pct', format: 'delta_percent' });
+  const rendered = renderEmail({ format: 'report', context: ctx, template, subject: 'R' });
+  assert.match(rendered.html, /white-space:nowrap;">↓ -35\.02%<\/td>/);
+  assert.match(rendered.html, /word-break:break-word;">Oud Nirvana, Oud Rocks &amp; White Oud Perfume 90 ML<\/td>/);
 });
