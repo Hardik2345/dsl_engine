@@ -18,7 +18,31 @@ function requireBinding(root, path) {
   return resolved.value;
 }
 
-function formatValue(value, format = 'text') {
+// Money in the tenant's currency (Tenant.settings.currency, threaded onto
+// context.meta.currency by workflowExecutionService). Falls back to a plain number
+// when the code is missing or not a valid ISO currency.
+function formatCurrency(number, currency) {
+  if (currency) {
+    try {
+      return new Intl.NumberFormat(currency === 'INR' ? 'en-IN' : 'en-US', {
+        style: 'currency', currency, minimumFractionDigits: 0, maximumFractionDigits: 2
+      }).format(number);
+    } catch {
+      // invalid currency code: fall through to a plain number
+    }
+  }
+  return number.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+}
+
+// Like requireBinding, but a path that resolves to null/undefined returns null
+// instead of throwing -- only an unknown path is an error.
+function requirePresentBinding(root, path) {
+  const resolved = resolveBinding(root, path);
+  if (!resolved.found) throw new Error(`missing required binding: ${path}`);
+  return resolved.value ?? null;
+}
+
+function formatValue(value, format = 'text', { currency } = {}) {
   if (format === 'text') return String(value ?? '');
   const number = Number(value);
   if (!Number.isFinite(number)) throw new Error(`value is not numeric for format ${format}`);
@@ -27,6 +51,7 @@ function formatValue(value, format = 'text') {
   if (format === 'percent_ratio') return `${(number * 100).toFixed(2)}%`;
   if (format === 'percent') return `${number.toFixed(2)}%`;
   if (format === 'delta_percent') return `${number > 0 ? '+' : ''}${number.toFixed(2)}%`;
+  if (format === 'currency') return formatCurrency(number, currency);
   throw new Error(`unsupported value format: ${format}`);
 }
 
@@ -53,13 +78,17 @@ function buildReportViewModel({ context, template, branding }) {
     throw new Error('report period bindings must resolve to start/end objects');
   }
 
+  const currency = context?.meta?.currency;
   const metrics = template.metrics.map((item) => {
-    const rawValue = requireBinding(context, item.value);
-    const rawChange = item.change ? requireBinding(context, item.change) : null;
+    // A card path that doesn't exist is a misconfiguration and still fails loudly,
+    // but one that exists with no value (e.g. AOV or a delta when a window had zero
+    // orders) is legitimate data and renders as a dash instead of failing the run.
+    const rawValue = requirePresentBinding(context, item.value);
+    const rawChange = item.change ? requirePresentBinding(context, item.change) : null;
     return {
       label: item.label,
       icon: item.icon || 'metric',
-      value: formatValue(rawValue, item.format),
+      value: rawValue == null ? '—' : formatValue(rawValue, item.format, { currency }),
       change: rawChange == null ? null : formatValue(rawChange, 'delta_percent'),
       changeValue: rawChange == null ? null : Number(rawChange),
     };
@@ -77,7 +106,7 @@ function buildReportViewModel({ context, template, branding }) {
         cells: table.columns.map((column) => {
           const rawValue = requireBinding(entry, column.path);
           return {
-            value: formatValue(rawValue, column.format),
+            value: formatValue(rawValue, column.format, { currency }),
             numericValue: column.format === 'delta_percent' ? Number(rawValue) : null,
             format: column.format,
           };
@@ -85,6 +114,15 @@ function buildReportViewModel({ context, template, branding }) {
       }))
     };
   });
+
+  // Optional: the insight node's generated text, shown as a takeaway under the KPI
+  // cards. Same binding convention as the insight email format's insightSource.
+  let insight = null;
+  if (template.insightSource) {
+    const resolved = requireBinding(context, template.insightSource);
+    if (typeof resolved !== 'object') throw new Error(`insight source must resolve to an insight: ${template.insightSource}`);
+    insight = resolved.summary ? { summary: String(resolved.summary) } : null;
+  }
 
   return {
     branding: resolveEmailBranding({
@@ -102,8 +140,25 @@ function buildReportViewModel({ context, template, branding }) {
     currentRange: formatRange(currentPeriod, timezone),
     comparisonRange: formatRange(comparisonPeriod, timezone),
     metrics,
+    insight,
     tables,
   };
+}
+
+// Colors signed percentages in the takeaway the way the insight email does:
+// red for negative, green for positive. Runs on already-escaped text, and the
+// pattern only matches digits, signs, '.' and '%', so it can't break the escaping.
+function highlightPercentages(escapedText) {
+  return escapedText.replace(/([-+]?\d+(?:\.\d+)?%)/g, (match) => {
+    const value = parseFloat(match);
+    if (!Number.isFinite(value) || value === 0) return match;
+    return `<span style="font-weight:800;color:${changeColor(value)};">${match}</span>`;
+  });
+}
+
+function renderInsight(insight, primaryColor) {
+  if (!insight) return '';
+  return `<div style="margin-top:22px;padding:18px 20px;border:1px solid #e5e7eb;border-left:4px solid ${primaryColor};border-radius:8px;background:#fafafa;"><div style="font-size:11px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:${primaryColor};">Key takeaway</div><div style="margin-top:8px;font-size:16px;line-height:1.5;font-weight:600;color:#111827;">${highlightPercentages(escapeHtml(insight.summary))}</div></div>`;
 }
 
 function changeColor(value) {
@@ -113,17 +168,27 @@ function changeColor(value) {
 }
 
 function iconGlyph(icon) {
-  return { sessions: '◎', orders: '▣', conversion: '↗', trend: '↗', metric: '●' }[icon] || '●';
+  return { sessions: '◎', orders: '▣', conversion: '↗', trend: '↗', sales: '◆', aov: '◇', cart: '⊕', metric: '●' }[icon] || '●';
+}
+
+// Up to four cards sit on one row; five or six wrap into rows of three so the
+// values stay readable in a ~700px email.
+function chunkMetricRows(metrics) {
+  const perRow = metrics.length <= 4 ? metrics.length : 3;
+  const rows = [];
+  for (let i = 0; i < metrics.length; i += perRow) rows.push(metrics.slice(i, i + perRow));
+  return { rows, perRow };
 }
 
 function renderMetricCards(metrics, primaryColor) {
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid #e5e7eb;border-radius:8px;"><tr>${metrics.map((metric, index) => `
-    <td width="${Math.floor(100 / metrics.length)}%" align="center" style="padding:24px 10px;border-left:${index ? '1px solid #e5e7eb' : 'none'};">
+  const { rows, perRow } = chunkMetricRows(metrics);
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid #e5e7eb;border-radius:8px;">${rows.map((row, rowIndex) => `<tr>${row.map((metric, index) => `
+    <td width="${Math.floor(100 / perRow)}%" align="center" style="padding:24px 10px;border-left:${index ? '1px solid #e5e7eb' : 'none'};border-top:${rowIndex ? '1px solid #e5e7eb' : 'none'};">
       <div aria-hidden="true" style="font-size:22px;line-height:1;color:${primaryColor};">${iconGlyph(metric.icon)}</div>
       <div style="font-size:12px;font-weight:700;color:${primaryColor};text-transform:uppercase;letter-spacing:.04em;">${escapeHtml(metric.label)}</div>
       <div style="margin-top:12px;font-size:27px;font-weight:800;color:#111827;">${escapeHtml(metric.value)}</div>
       ${metric.change == null ? '' : `<div style="margin-top:8px;font-size:15px;font-weight:700;color:${changeColor(metric.changeValue)};">${metric.changeValue > 0 ? '↑' : metric.changeValue < 0 ? '↓' : '—'} ${escapeHtml(metric.change)}</div>`}
-    </td>`).join('')}</tr></table>`;
+    </td>`).join('')}</tr>`).join('')}</table>`;
 }
 
 function renderTable(table, primaryColor) {
@@ -146,6 +211,7 @@ function renderReportEmail({ context, template, branding, subject }) {
     <div style="margin-top:12px;font-size:38px;line-height:1.08;font-weight:900;color:#050505;">${escapeHtml(view.title)}</div>
     ${view.description ? `<div style="margin:16px 0 26px;font-size:16px;line-height:1.5;color:#5b5b5b;">${escapeHtml(view.description)}</div>` : '<div style="height:24px;"></div>'}
     ${renderMetricCards(view.metrics, brand.primaryColor)}
+    ${renderInsight(view.insight, brand.primaryColor)}
     ${view.tables.map((table) => renderTable(table, brand.primaryColor)).join('')}
     <div style="margin-top:22px;padding:15px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#4b5563;">Comparisons use ${escapeHtml(view.comparisonRange)} in ${escapeHtml(view.timezone)}.</div>
     <table role="presentation" width="100%" style="margin-top:26px;border-collapse:collapse;"><tr><td style="font-weight:800;letter-spacing:.15em;">${escapeHtml(brand.displayName.toUpperCase())}</td><td align="right" style="font-size:12px;color:#6b7280;">${escapeHtml(brand.footerText)}</td></tr></table>
@@ -160,6 +226,7 @@ function renderReportEmail({ context, template, branding, subject }) {
     `Comparison period: ${view.comparisonRange} (${view.timezone})`,
     '',
     ...view.metrics.map((metric) => `${metric.label}: ${metric.value}${metric.change == null ? '' : ` (${metric.change})`}`),
+    ...(view.insight ? ['', `Key takeaway: ${view.insight.summary}`] : []),
     ...view.tables.flatMap((table) => ['', table.title, ...(table.rows.length ? table.rows.map((row) => `${row.rank}. ${row.cells.map((cell, index) => `${table.columns[index].label}: ${cell.value}`).join(' | ')}`) : ['No data available'])]),
     '',
     brand.footerText,

@@ -15,6 +15,8 @@ const scheduleRoutes = require('./server/routes/schedules');
 const triggerRoutes = require('./server/routes/triggers');
 const schedulerRoutes = require('./server/routes/scheduler');
 const alertsIngestRoutes = require('./server/routes/alertsIngest');
+const telegramRoutes = require('./server/routes/telegram');
+const { startLinkBot } = require('./server/services/telegramBot');
 
 const app = express();
 app.set('trust proxy', 1);
@@ -68,6 +70,7 @@ app.use('/tenants/:tenantId/insights', insightRoutes);
 app.use('/tenants/:tenantId/triggers', triggerRoutes);
 app.use('/tenants/:tenantId/scheduler', schedulerRoutes);
 app.use('/tenants', alertsIngestRoutes);
+app.use('/telegram', telegramRoutes);
 
 app.use((err, req, res, next) => {
   const status = err.status || 500;
@@ -83,6 +86,10 @@ async function start() {
   }
 
   await mongoose.connect(mongoUri);
+
+  // Completes "Copy Telegram link" links (/start <token>). API server only: Telegram
+  // allows one poller per bot token, so the worker never starts it.
+  startLinkBot();
 
   const port = process.env.PORT || 3000;
   app.listen(port, () => {

@@ -75,7 +75,7 @@ export default function NodeSidebar() {
 
         <SidebarItem
             type="email"
-            label="Email"
+            label="Messaging"
             icon={Mail}
             colorClass="border-cyan-200 text-cyan-700"
             onDragStart={onDragStart}

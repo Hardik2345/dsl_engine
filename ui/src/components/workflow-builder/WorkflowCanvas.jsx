@@ -19,6 +19,7 @@ const nodeTypes = {
   composite: CompositeNode,
   workflow_ref: WorkflowRefNode,
   email: EmailNode,
+  messaging: EmailNode,
 };
 
 const edgeTypes = {
@@ -76,12 +77,14 @@ export default function WorkflowCanvas({
             ...(type === 'composite' ? { type: 'composite', steps: [] } : {}),
             ...(type === 'insight' ? { type: 'insight', template: '' } : {}),
             ...(type === 'email' ? {
-              type: 'email',
+              type: 'messaging',
+              channels: { email: true, telegram: false },
               format: 'insight',
-              to: [],
+              email: { to: [] },
+              telegram: { users: [], severity: 'info' },
               subject: '{{meta.brandName}}: Insight',
               template: { insightSource: 'scratch.finalInsight' },
-              on_fail: { action: 'terminate', reason: 'Email could not be sent' }
+              on_fail: { action: 'terminate', reason: 'Message could not be sent' }
             } : {})
         },
       };

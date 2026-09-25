@@ -31,7 +31,7 @@ export const jsonToGraph = (workflowJson) => {
     if (n.type === 'insight') type = 'insight';
     if (n.type === 'composite') type = 'composite';
     if (n.type === 'workflow_ref') type = 'workflow_ref';
-    if (n.type === 'email') type = 'email';
+    if (n.type === 'email' || n.type === 'messaging') type = 'email';
     if (n.id === 'trigger') type = 'trigger'; // hypothetical
 
     // For branch nodes, ensure each rule has a stable _ruleId
@@ -161,6 +161,12 @@ export const graphToJson = (nodes, edges, initialMetadata) => {
     // Clean up internal React Flow flags
     delete backendNode.label;
 
+    // React Flow renders both legacy email and messaging with the email component.
+    // Preserve the backend node type from the node data explicitly.
+    if (node.data?.type === 'messaging') {
+      backendNode.type = 'messaging';
+    }
+
     // Ensure type is present (Critical Fix for backend validation)
     // If backendNode.type is missing, infer it from React Flow node.type
     if (!backendNode.type) {
@@ -169,7 +175,8 @@ export const graphToJson = (nodes, edges, initialMetadata) => {
       if (node.type === 'insight') backendNode.type = 'insight';
       if (node.type === 'composite') backendNode.type = 'composite';
       if (node.type === 'workflow_ref') backendNode.type = 'workflow_ref';
-      if (node.type === 'email') backendNode.type = 'email';
+      if (node.type === 'email' && backendNode.type !== 'messaging') backendNode.type = 'email';
+      if (node.type === 'messaging') backendNode.type = 'messaging';
       // Note: 'analysis' nodes (metric_compare/breakdown) explicitly set 'type' in data during creation,
       // so they should likely preserve it.
     }
